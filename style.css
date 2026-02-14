@@ -1,0 +1,54 @@
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0b0e14;
+    color: #e6e6e6;
+    margin: 20px;
+}
+
+h1 {
+    margin-bottom: 5px;
+}
+
+#progress {
+    margin-bottom: 15px;
+    opacity: 0.8;
+}
+
+#champion-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 10px;
+}
+
+.champion {
+    background: #151a23;
+    border-radius: 8px;
+    padding: 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
+}
+
+.champion:hover {
+    transform: scale(1.05);
+}
+
+.champion img {
+    width: 64px;
+    height: 64px;
+    border-radius: 6px;
+}
+
+.champion-name {
+    font-size: 12px;
+    margin-top: 4px;
+    word-break: break-word;
+}
+
+.champion.done {
+    opacity: 0.35;
+}
+
+.champion.done img {
+    filter: grayscale(100%);
+}
