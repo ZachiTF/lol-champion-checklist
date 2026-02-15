@@ -1,5 +1,5 @@
 // --- CONFIG ---
-const PATCH = "14.2.1";
+const PATCH = "16.1.1";
 const LANG = "en_US";
 
 const CHAMPION_JSON_URL =

@@ -62,7 +62,7 @@ h1 {
 .tab {
     padding: 6px 12px;
     background: #151a23;
-    border-radius: 8px 8px 0 0;
+    border-radius: 4px 4px 4px 4px;
     cursor: pointer;
     font-size: 13px;
     opacity: 0.7;
