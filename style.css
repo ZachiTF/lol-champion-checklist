@@ -63,11 +63,45 @@ h1 .highlight {
 }
 
 #progress {
-    margin: 0;
+    margin: 0 0 10px 0;
     font-size: 16px;
     font-weight: 600;
     color: rgba(200, 155, 60, 0.9);
     letter-spacing: 0.5px;
+}
+
+.progress-info {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(200, 155, 60, 0.2);
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #c89b3c 0%, #f0e6d2 50%, #c89b3c 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 12px rgba(200, 155, 60, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+body.animations-enabled .progress-bar {
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 /* Theme Switcher */
@@ -76,9 +110,12 @@ h1 .highlight {
     top: 20px;
     right: 20px;
     z-index: 1000;
+    display: flex;
+    gap: 8px;
 }
 
-#theme-switcher .theme-toggle {
+#theme-switcher .theme-toggle,
+#theme-switcher .animation-toggle {
     background: var(--tab, #151a23);
     color: var(--fg, #e6e6e6);
     border: none;
@@ -94,9 +131,14 @@ h1 .highlight {
     transition: all 0.2s;
 }
 
-#theme-switcher .theme-toggle:hover {
+#theme-switcher .theme-toggle:hover,
+#theme-switcher .animation-toggle:hover {
     transform: scale(1.1);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+#theme-switcher .animation-toggle.disabled {
+    opacity: 0.5;
 }
 
 /* Tabs */

@@ -53,7 +53,16 @@ function getProgress() {
 function updateProgressText() {
     const progress = getProgress();
     const done = Object.values(progress).filter(Boolean).length;
-    progressText.textContent = `Progress: ${done} / ${champions.length}`;
+    const total = champions.length;
+    const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
+    
+    progressText.textContent = `Progress: ${done} / ${total}`;
+    
+    // Update progress bar
+    const progressBar = document.getElementById("progress-bar");
+    if (progressBar) {
+        progressBar.style.width = `${percentage}%`;
+    }
 }
 
 function renderTabs() {
@@ -336,9 +345,10 @@ function renderThemeSwitcher() {
     const bar = document.getElementById("theme-switcher");
     if (!bar) return;
     
-    const current = localStorage.getItem("lol_theme") || "auto";
+    bar.innerHTML = "";
     
-    // Cycle through: auto -> dark -> light -> auto
+    // Theme toggle button
+    const current = localStorage.getItem("lol_theme") || "auto";
     const cycleOrder = ["auto", "dark", "light"];
     const nextTheme = cycleOrder[(cycleOrder.indexOf(current) + 1) % cycleOrder.length];
     
@@ -348,21 +358,38 @@ function renderThemeSwitcher() {
         light: "☀"
     };
     
-    bar.innerHTML = "";
-    const btn = document.createElement("button");
-    btn.className = "theme-toggle";
-    btn.textContent = icons[current];
-    btn.title = `Theme: ${current} (click to switch to ${nextTheme})`;
-    btn.onclick = () => {
+    const themeBtn = document.createElement("button");
+    themeBtn.className = "theme-toggle";
+    themeBtn.textContent = icons[current];
+    themeBtn.title = `Theme: ${current} (click to switch to ${nextTheme})`;
+    themeBtn.onclick = () => {
         setTheme(nextTheme);
         renderThemeSwitcher();
     };
-    bar.appendChild(btn);
+    bar.appendChild(themeBtn);
+    
+    // Animation toggle button
+    const animationsEnabled = localStorage.getItem("lol_animations") !== "false";
+    const animBtn = document.createElement("button");
+    animBtn.className = "animation-toggle" + (animationsEnabled ? "" : " disabled");
+    animBtn.textContent = "✨";
+    animBtn.title = `Animations: ${animationsEnabled ? "On" : "Off"} (click to toggle)`;
+    animBtn.onclick = () => {
+        const newState = !animationsEnabled;
+        localStorage.setItem("lol_animations", newState);
+        document.body.classList.toggle("animations-enabled", newState);
+        renderThemeSwitcher();
+    };
+    bar.appendChild(animBtn);
 }
 
 // --- MAIN ---
 // Initialize theme on load
 setTheme(localStorage.getItem("lol_theme") || "auto");
+
+// Initialize animations (off by default for better performance)
+const animationsEnabled = localStorage.getItem("lol_animations") === "true";
+document.body.classList.toggle("animations-enabled", animationsEnabled);
 
 // Listen for system theme changes when in auto mode
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
