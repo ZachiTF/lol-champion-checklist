@@ -1,13 +1,10 @@
 // --- CONFIG ---
-const PATCH = "16.1.1";
 const LANG = "en_US";
-
-const CHAMPION_JSON_URL =
-    `https://ddragon.leagueoflegends.com/cdn/${PATCH}/data/${LANG}/champion.json`;
-const CHAMPION_ICON_BASE =
-    `https://ddragon.leagueoflegends.com/cdn/${PATCH}/img/champion/`;
-
 const STORAGE_KEY = "lol_pages";
+
+let PATCH = null;
+let CHAMPION_JSON_URL = null;
+let CHAMPION_ICON_BASE = null;
 
 // --- STATE ---
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
@@ -129,7 +126,16 @@ function renderAll() {
 }
 
 // --- MAIN ---
-fetch(CHAMPION_JSON_URL)
+// Step 1: Fetch latest patch version
+fetch("https://ddragon.leagueoflegends.com/api/versions.json")
+    .then(res => res.json())
+    .then(versions => {
+        PATCH = versions[0];
+        CHAMPION_JSON_URL = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/data/${LANG}/champion.json`;
+        CHAMPION_ICON_BASE = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/img/champion/`;
+        // Step 2: Fetch champion data for latest patch
+        return fetch(CHAMPION_JSON_URL);
+    })
     .then(res => res.json())
     .then(data => {
         champions = Object.values(data.data)
