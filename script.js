@@ -15,6 +15,15 @@ let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
 let champions = [];
 
 // --- ELEMENTS ---
+const DEFAULT_COLORS = [
+    "#e57373", "#64b5f6", "#81c784", "#ffd54f", "#ba68c8", "#4db6ac", "#ffb74d", "#a1887f", "#90a4ae"
+];
+function getNextColor() {
+    const used = Object.values(state.pages).map(p => p.color);
+    for (const c of DEFAULT_COLORS) if (!used.includes(c)) return c;
+    // fallback: random color
+    return `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+}
 const grid = document.getElementById("champion-grid");
 const progressText = document.getElementById("progress");
 const tabsBar = document.getElementById("tabs-bar");
@@ -29,7 +38,8 @@ function createPage(name) {
     const id = crypto.randomUUID();
     state.pages[id] = {
         name,
-        progress: {}
+        progress: {},
+        color: getNextColor()
     };
     state.activePage = id;
     saveState();
@@ -53,13 +63,14 @@ function renderTabs() {
         const tab = document.createElement("div");
         tab.className = "tab" + (id === state.activePage ? " active" : "");
         tab.textContent = page.name;
-
+        if (page.color) {
+            tab.style.background = page.color;
+        }
         tab.onclick = () => {
             state.activePage = id;
             saveState();
             renderAll();
         };
-
         tabsBar.appendChild(tab);
     }
 
@@ -75,6 +86,185 @@ function renderTabs() {
     };
 
     tabsBar.appendChild(addTab);
+}
+
+function renderTabActions() {
+    const actionsBar = document.getElementById("tab-actions");
+    actionsBar.innerHTML = "";
+    if (!state.activePage || !state.pages[state.activePage]) return;
+    const page = state.pages[state.activePage];
+    
+    // Style the actions bar with the tab color (grayed out)
+    if (page.color) {
+        actionsBar.style.background = shadeColor(page.color, 0.7);
+    } else {
+        actionsBar.style.background = '';
+    }
+
+    // Group 1: Color / Rename / Delete
+    const group1 = document.createElement("div");
+    group1.className = "action-group";
+
+    // Color picker swatch
+    const colorSwatch = document.createElement("label");
+    colorSwatch.className = "color-swatch";
+    colorSwatch.style.background = page.color || "#e57373";
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = page.color || "#e57373";
+    colorInput.title = "Pick tab color";
+    colorInput.onchange = (e) => {
+        page.color = e.target.value;
+        saveState();
+        renderAll();
+    };
+    colorSwatch.appendChild(colorInput);
+    group1.appendChild(colorSwatch);
+
+    // Rename
+    const renameBtn = document.createElement("button");
+    renameBtn.className = "action";
+    renameBtn.textContent = "Rename";
+    renameBtn.onclick = () => {
+        const newName = prompt("Rename tab:", page.name);
+        if (newName && newName !== page.name) {
+            page.name = newName;
+            saveState();
+            renderAll();
+        }
+    };
+    group1.appendChild(renameBtn);
+
+    // Delete
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "action";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.onclick = () => {
+        if (confirm("Delete this tab? This cannot be undone.")) {
+            delete state.pages[state.activePage];
+            // Switch to another tab if any
+            const ids = Object.keys(state.pages);
+            state.activePage = ids.length ? ids[0] : null;
+            saveState();
+            renderAll();
+        }
+    };
+    group1.appendChild(deleteBtn);
+    actionsBar.appendChild(group1);
+
+    // Group 2: Reset Progress / Select All
+    const group2 = document.createElement("div");
+    group2.className = "action-group";
+    
+    // Reset
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "action";
+    resetBtn.textContent = "Reset Progress";
+    resetBtn.onclick = () => {
+        if (confirm("Reset progress for this tab?")) {
+            page.progress = {};
+            saveState();
+            renderAll();
+        }
+    };
+    group2.appendChild(resetBtn);
+
+    // Select All
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.className = "action";
+    selectAllBtn.textContent = "Select All";
+    selectAllBtn.onclick = () => {
+        if (confirm("Mark all champions as done for this tab?")) {
+            for (const champ of champions) {
+                page.progress[champ.id] = true;
+            }
+            saveState();
+            renderAll();
+        }
+    };
+    group2.appendChild(selectAllBtn);
+    actionsBar.appendChild(group2);
+
+    // Group 3: Export / Import
+    const group3 = document.createElement("div");
+    group3.className = "action-group";
+
+    // Export
+    const exportBtn = document.createElement("button");
+    exportBtn.className = "action";
+    exportBtn.textContent = "Export";
+    exportBtn.onclick = () => {
+        const blob = new Blob([
+            JSON.stringify(page, null, 2)
+        ], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${page.name.replace(/[^a-z0-9]/gi, '_')}_lol_page.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+    group3.appendChild(exportBtn);
+
+    // Import
+    const importBtn = document.createElement("button");
+    importBtn.className = "action";
+    importBtn.textContent = "Import";
+    importBtn.onclick = () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json";
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const imported = JSON.parse(ev.target.result);
+                    if (imported.name && imported.progress) {
+                        const id = crypto.randomUUID();
+                        // Ensure imported page has a color
+                        if (!imported.color) {
+                            imported.color = getNextColor();
+                        }
+                        state.pages[id] = imported;
+                        state.activePage = id;
+                        saveState();
+                        renderAll();
+                    } else {
+                        alert("Invalid file format.");
+                    }
+                } catch {
+                    alert("Failed to import file.");
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    };
+    group3.appendChild(importBtn);
+    actionsBar.appendChild(group3);
+}
+
+// --- UTILITY FUNCTIONS ---
+// Shade color to create a grayed-out version
+function shadeColor(color, percent) {
+    // percent: 0 = original color, 1 = white
+    let R = parseInt(color.substring(1, 3), 16);
+    let G = parseInt(color.substring(3, 5), 16);
+    let B = parseInt(color.substring(5, 7), 16);
+    
+    R = Math.round(R + (128 - R) * percent);
+    G = Math.round(G + (128 - G) * percent);
+    B = Math.round(B + (128 - B) * percent);
+    
+    const rr = R.toString(16).padStart(2, '0');
+    const gg = G.toString(16).padStart(2, '0');
+    const bb = B.toString(16).padStart(2, '0');
+    
+    return `#${rr}${gg}${bb}`;
 }
 
 function createChampionCard(champ) {
@@ -121,11 +311,67 @@ function renderChampions() {
 }
 
 function renderAll() {
+    renderThemeSwitcher();
     renderTabs();
+    renderTabActions();
     renderChampions();
 }
 
+// --- THEME SWITCHER ---
+const THEMES = ["dark", "light", "auto"];
+
+function setTheme(theme) {
+    if (theme === "auto") {
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.body.classList.toggle("theme-dark", prefersDark);
+        document.body.classList.toggle("theme-light", !prefersDark);
+    } else {
+        document.body.classList.toggle("theme-dark", theme === "dark");
+        document.body.classList.toggle("theme-light", theme === "light");
+    }
+    localStorage.setItem("lol_theme", theme);
+}
+
+function renderThemeSwitcher() {
+    const bar = document.getElementById("theme-switcher");
+    if (!bar) return;
+    
+    const current = localStorage.getItem("lol_theme") || "auto";
+    
+    // Cycle through: auto -> dark -> light -> auto
+    const cycleOrder = ["auto", "dark", "light"];
+    const nextTheme = cycleOrder[(cycleOrder.indexOf(current) + 1) % cycleOrder.length];
+    
+    const icons = {
+        auto: "◐",
+        dark: "☾",
+        light: "☀"
+    };
+    
+    bar.innerHTML = "";
+    const btn = document.createElement("button");
+    btn.className = "theme-toggle";
+    btn.textContent = icons[current];
+    btn.title = `Theme: ${current} (click to switch to ${nextTheme})`;
+    btn.onclick = () => {
+        setTheme(nextTheme);
+        renderThemeSwitcher();
+    };
+    bar.appendChild(btn);
+}
+
 // --- MAIN ---
+// Initialize theme on load
+setTheme(localStorage.getItem("lol_theme") || "auto");
+
+// Listen for system theme changes when in auto mode
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    const currentTheme = localStorage.getItem("lol_theme") || "auto";
+    if (currentTheme === "auto") {
+        setTheme("auto");
+    }
+});
+
 // Step 1: Fetch latest patch version
 fetch("https://ddragon.leagueoflegends.com/api/versions.json")
     .then(res => res.json())
@@ -141,10 +387,18 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
         champions = Object.values(data.data)
             .sort((a, b) => a.name.localeCompare(b.name));
 
+        // Migration: Ensure all existing pages have colors
+        for (const [id, page] of Object.entries(state.pages)) {
+            if (!page.color) {
+                page.color = getNextColor();
+            }
+        }
+
         if (Object.keys(state.pages).length === 0) {
             createPage("Default");
         }
 
+        saveState();
         renderAll();
     })
     .catch(err => {
