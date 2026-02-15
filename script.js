@@ -71,10 +71,13 @@ function renderTabs() {
     for (const [id, page] of Object.entries(state.pages)) {
         const tab = document.createElement("div");
         tab.className = "tab" + (id === state.activePage ? " active" : "");
-        tab.textContent = page.name;
+        // Determine text color for contrast
+        let textColor = "";
         if (page.color) {
             tab.style.background = page.color;
+            textColor = getContrastYIQ(page.color);
         }
+        tab.innerHTML = `<span class="tab-label" style="color:${textColor}">${page.name}</span>`;
         tab.onclick = () => {
             state.activePage = id;
             saveState();
@@ -82,6 +85,19 @@ function renderTabs() {
         };
         tabsBar.appendChild(tab);
     }
+// Returns '#222' for light backgrounds, '#fff' for dark backgrounds
+function getContrastYIQ(hexcolor) {
+    let hex = hexcolor.replace('#', '');
+    if (hex.length === 3) {
+        hex = hex.split('').map(x => x + x).join('');
+    }
+    const r = parseInt(hex.substr(0,2),16);
+    const g = parseInt(hex.substr(2,2),16);
+    const b = parseInt(hex.substr(4,2),16);
+    // YIQ formula
+    const yiq = ((r*299)+(g*587)+(b*114))/1000;
+    return yiq >= 180 ? '#222' : '#fff';
+}
 
     const addTab = document.createElement("div");
     addTab.className = "tab add";
