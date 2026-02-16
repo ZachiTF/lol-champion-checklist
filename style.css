@@ -38,6 +38,19 @@
 .challenge-import input[type="text"] {
   padding: 8px 14px;
   border-radius: 6px;
+
+  .wip-notice {
+    background: #ffe7b3;
+    color: #7a4c00;
+    border: 1px solid #c89b3c;
+    border-radius: 6px;
+    padding: 10px 18px;
+    margin: 18px auto 10px auto;
+    text-align: center;
+    font-size: 1.08em;
+    max-width: 600px;
+    box-shadow: 0 2px 8px 0 rgba(200, 155, 60, 0.07);
+  }
   border: 1px solid #c89b3c;
   font-size: 1em;
   background: var(--card-bg);

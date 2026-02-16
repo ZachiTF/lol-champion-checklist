@@ -21,5 +21,18 @@ Allows the creation and naming of multiple instances of the list; in case you ar
 
 ## Data Structure
 Champion metadata is stored in `/data` folder:
-- `champion-regions.json` - Maps champions to lore regions
-- `champion-properties.json` - Champion abilities and properties
+- `champion-regions.js` - Maps champions to lore regions (auto-generated from Community Dragon)
+- `champion-properties.js` - Champion abilities and properties
+
+### Updating Champion Data
+To update champion region mappings from Riot's official data:
+```bash
+npm run update-data
+```
+This fetches the latest champion data from [Community Dragon](https://communitydragon.org/) and regenerates `champion-regions.js` based on champion faction tags from the challenges API.
+
+## Globetrotter / Harmony
+
+While this tool can filter by some of the challenges, there are tools better tailored for that.
+
+Check out https://github.com/AlexDerr/ChallengeComps and https://tahm-ken.ch/team_builder

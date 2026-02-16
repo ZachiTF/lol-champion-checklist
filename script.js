@@ -109,29 +109,24 @@ let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
 let champions = [];
 
 // Champion metadata - loaded from data/*.js files as global constants:
-// CHAMPION_REGIONS and CHAMPION_PROPERTIES
+// GLOBETROTTER_FILTERS and HARMONY_FILTERS
 
 // Filter state - now supports multiple selections per category
 let filterState = {
   search: "",
-  regions: [], // Multiple regions
-  properties: [], // Multiple properties
+  globetrotter: [], // Multiple globetrotter filters (regions)
+  harmony: [], // Multiple harmony filters (properties)
 };
 
-// Get champion metadata
-function getChampionRegion(champId) {
-  return CHAMPION_REGIONS[champId] || "Unknown";
-}
-
-function getChampionProperties(champId) {
-  const props = [];
-  for (const [propName, propData] of Object.entries(CHAMPION_PROPERTIES)) {
-    const champList = propData.champions || propData;
-    if (champList.includes(champId)) {
-      props.push(propName);
+// Get which filters a champion belongs to
+function getChampionFilters(champId, filterObject) {
+  const filters = [];
+  for (const [filterName, filterData] of Object.entries(filterObject)) {
+    if (filterData.champions.includes(champId)) {
+      filters.push(filterName);
     }
   }
-  return props;
+  return filters;
 }
 
 // --- ELEMENTS ---
@@ -457,14 +452,15 @@ function renderChampions() {
   grid.innerHTML = "";
   const progress = getProgress();
 
-  // Helper function to filter champions by properties (AND logic)
-  function filterByProperties(champList) {
-    if (filterState.properties.length === 0) return champList;
+  // Helper function to filter champions by harmony filters (AND logic)
+  function filterByHarmony(champList) {
+    if (filterState.harmony.length === 0) return champList;
 
     return champList.filter((champ) => {
-      const champProps = getChampionProperties(champ.id);
-      // Must have ALL selected properties (AND logic)
-      return filterState.properties.every((prop) => champProps.includes(prop));
+      // Must be in ALL selected harmony filters (AND logic)
+      return filterState.harmony.every((filterName) =>
+        HARMONY_FILTERS[filterName].champions.includes(champ.id),
+      );
     });
   }
 
@@ -478,11 +474,11 @@ function renderChampions() {
     );
   }
 
-  // If no regions selected, show all champions with property/search filters
-  if (filterState.regions.length === 0) {
+  // If no globetrotter filters selected, show all champions with harmony/search filters
+  if (filterState.globetrotter.length === 0) {
     let filteredChampions = [...champions];
     filteredChampions = filterBySearch(filteredChampions);
-    filteredChampions = filterByProperties(filteredChampions);
+    filteredChampions = filterByHarmony(filteredChampions);
 
     // Show count
     const filterCount = document.createElement("div");
@@ -502,63 +498,64 @@ function renderChampions() {
       grid.appendChild(createChampionCard(champ));
     });
   } else {
-    // Multiple regions selected - create separate grid for each region
-    filterState.regions.forEach((selectedRegion, index) => {
-      // Filter champions for this region
-      let regionChampions = champions.filter(
-        (champ) => getChampionRegion(champ.id) === selectedRegion,
+    // Multiple globetrotter filters selected - create separate grid for each
+    filterState.globetrotter.forEach((selectedFilter, index) => {
+      // Get champions for this filter
+      const filterData = GLOBETROTTER_FILTERS[selectedFilter];
+      let filterChampions = champions.filter((champ) =>
+        filterData.champions.includes(champ.id),
       );
-      regionChampions = filterBySearch(regionChampions);
-      regionChampions = filterByProperties(regionChampions);
+      filterChampions = filterBySearch(filterChampions);
+      filterChampions = filterByHarmony(filterChampions);
 
-      // Create region section
-      const regionSection = document.createElement("div");
-      regionSection.className = "region-section";
+      // Create filter section
+      const filterSection = document.createElement("div");
+      filterSection.className = "region-section";
 
-      // Create region header with badge
-      const regionHeader = document.createElement("div");
-      regionHeader.className = "region-header";
+      // Create filter header with badge
+      const filterHeader = document.createElement("div");
+      filterHeader.className = "region-header";
 
-      const regionBadge = document.createElement("div");
-      regionBadge.className = "filter-badge filter-badge-region";
-      const regionLabel = document.createElement("span");
-      regionLabel.className = "filter-badge-label";
-      regionLabel.textContent = selectedRegion;
-      const regionRemove = document.createElement("span");
-      regionRemove.className = "filter-badge-remove";
-      regionRemove.textContent = "×";
-      regionRemove.onclick = () => {
-        filterState.regions = filterState.regions.filter(
-          (r) => r !== selectedRegion,
+      const filterBadge = document.createElement("div");
+      filterBadge.className = "filter-badge filter-badge-region";
+      const filterLabel = document.createElement("span");
+      filterLabel.className = "filter-badge-label";
+      filterLabel.textContent = selectedFilter;
+      const filterRemove = document.createElement("span");
+      filterRemove.className = "filter-badge-remove";
+      filterRemove.textContent = "×";
+      filterRemove.onclick = () => {
+        filterState.globetrotter = filterState.globetrotter.filter(
+          (r) => r !== selectedFilter,
         );
         renderActiveFilters();
         renderChampions();
       };
-      regionBadge.appendChild(regionLabel);
-      regionBadge.appendChild(regionRemove);
-      regionHeader.appendChild(regionBadge);
+      filterBadge.appendChild(filterLabel);
+      filterBadge.appendChild(filterRemove);
+      filterHeader.appendChild(filterBadge);
 
-      // Show count for this region
-      const regionCount = document.createElement("span");
-      regionCount.className = "region-count";
-      regionCount.textContent = `${regionChampions.length} champions`;
-      regionHeader.appendChild(regionCount);
+      // Show count for this filter
+      const filterCount = document.createElement("span");
+      filterCount.className = "region-count";
+      filterCount.textContent = `${filterChampions.length} champions`;
+      filterHeader.appendChild(filterCount);
 
-      regionSection.appendChild(regionHeader);
+      filterSection.appendChild(filterHeader);
 
-      // Create grid for this region
-      const regionGrid = document.createElement("div");
-      regionGrid.className = "champion-grid-region";
+      // Create grid for this filter
+      const filterGrid = document.createElement("div");
+      filterGrid.className = "champion-grid-region";
 
-      regionChampions.forEach((champ) => {
+      filterChampions.forEach((champ) => {
         if (!(champ.id in progress)) {
           progress[champ.id] = false;
         }
-        regionGrid.appendChild(createChampionCard(champ));
+        filterGrid.appendChild(createChampionCard(champ));
       });
 
-      regionSection.appendChild(regionGrid);
-      grid.appendChild(regionSection);
+      filterSection.appendChild(filterGrid);
+      grid.appendChild(filterSection);
     });
   }
 
@@ -581,10 +578,10 @@ function renderActiveFilters() {
 
   container.innerHTML = "";
 
-  // Only render property badges in the active filters area
-  // Region badges are shown inline with their respective grids
-  filterState.properties.forEach((prop) => {
-    const badge = createFilterBadge(prop, "property");
+  // Only render harmony badges in the active filters area
+  // Globetrotter badges are shown inline with their respective grids
+  filterState.harmony.forEach((harmonyFilter) => {
+    const badge = createFilterBadge(harmonyFilter, "harmony");
     container.appendChild(badge);
   });
 }
@@ -592,8 +589,8 @@ function renderActiveFilters() {
 function createFilterBadge(value, type) {
   const badge = document.createElement("div");
   badge.className = "filter-badge";
-  if (type === "region") badge.classList.add("filter-badge-region");
-  if (type === "property") badge.classList.add("filter-badge-property");
+  if (type === "globetrotter") badge.classList.add("filter-badge-region");
+  if (type === "harmony") badge.classList.add("filter-badge-property");
 
   const label = document.createElement("span");
   label.className = "filter-badge-label";
@@ -603,12 +600,12 @@ function createFilterBadge(value, type) {
   remove.className = "filter-badge-remove";
   remove.textContent = "×";
   remove.onclick = () => {
-    if (type === "region") {
-      filterState.regions = filterState.regions.filter((r) => r !== value);
-    } else if (type === "property") {
-      filterState.properties = filterState.properties.filter(
-        (p) => p !== value,
+    if (type === "globetrotter") {
+      filterState.globetrotter = filterState.globetrotter.filter(
+        (r) => r !== value,
       );
+    } else if (type === "harmony") {
+      filterState.harmony = filterState.harmony.filter((p) => p !== value);
     }
     renderActiveFilters();
     renderChampions();
@@ -621,38 +618,34 @@ function createFilterBadge(value, type) {
 
 function initializeFilters() {
   const searchInput = document.getElementById("filter-search");
-  const regionSelect = document.getElementById("filter-region");
-  const propertiesSelect = document.getElementById("filter-properties");
+  const globetrotterSelect = document.getElementById("filter-region");
+  const harmonySelect = document.getElementById("filter-properties");
   const resetBtn = document.getElementById("filter-reset");
 
   const searchClearBtn = document.getElementById("filter-search-clear");
-  if (!searchInput || !regionSelect || !propertiesSelect || !searchClearBtn)
+  if (!searchInput || !globetrotterSelect || !harmonySelect || !searchClearBtn)
     return;
 
-  // Populate region dropdown
-  const regions = new Set();
-  champions.forEach((champ) => {
-    const region = getChampionRegion(champ.id);
-    if (region !== "Unknown") regions.add(region);
-  });
-  regionSelect.innerHTML =
-    '<option value="" disabled selected>Add Region Filter</option>';
-  [...regions].sort().forEach((region) => {
+  // Populate globetrotter dropdown
+  const globetrotterFilters = Object.keys(GLOBETROTTER_FILTERS).sort();
+  globetrotterSelect.innerHTML =
+    '<option value="" disabled selected>Add Globetrotter Filter</option>';
+  globetrotterFilters.forEach((filterName) => {
     const opt = document.createElement("option");
-    opt.value = region;
-    opt.textContent = region;
-    regionSelect.appendChild(opt);
+    opt.value = filterName;
+    opt.textContent = filterName;
+    globetrotterSelect.appendChild(opt);
   });
 
-  // Populate properties dropdown
-  const properties = Object.keys(CHAMPION_PROPERTIES).sort();
-  propertiesSelect.innerHTML =
-    '<option value="" disabled selected>Add Property Filter</option>';
-  properties.forEach((prop) => {
+  // Populate harmony dropdown
+  const harmonyFilters = Object.keys(HARMONY_FILTERS).sort();
+  harmonySelect.innerHTML =
+    '<option value="" disabled selected>Add Harmony Filter</option>';
+  harmonyFilters.forEach((filterName) => {
     const opt = document.createElement("option");
-    opt.value = prop;
-    opt.textContent = prop;
-    propertiesSelect.appendChild(opt);
+    opt.value = filterName;
+    opt.textContent = filterName;
+    harmonySelect.appendChild(opt);
   });
 
   // Event listeners
@@ -671,30 +664,30 @@ function initializeFilters() {
   };
   searchClearBtn.style.display = searchInput.value ? "inline" : "none";
 
-  regionSelect.addEventListener("change", (e) => {
+  globetrotterSelect.addEventListener("change", (e) => {
     const value = e.target.value;
-    if (value && !filterState.regions.includes(value)) {
-      filterState.regions.push(value);
+    if (value && !filterState.globetrotter.includes(value)) {
+      filterState.globetrotter.push(value);
       renderActiveFilters();
       renderChampions();
     }
     // Reset dropdown to placeholder
-    regionSelect.selectedIndex = 0;
+    globetrotterSelect.selectedIndex = 0;
   });
 
-  propertiesSelect.addEventListener("change", (e) => {
+  harmonySelect.addEventListener("change", (e) => {
     const value = e.target.value;
-    if (value && !filterState.properties.includes(value)) {
-      filterState.properties.push(value);
+    if (value && !filterState.harmony.includes(value)) {
+      filterState.harmony.push(value);
       renderActiveFilters();
       renderChampions();
     }
     // Reset dropdown to placeholder
-    propertiesSelect.selectedIndex = 0;
+    harmonySelect.selectedIndex = 0;
   });
 
   resetBtn.addEventListener("click", () => {
-    filterState = { search: "", regions: [], properties: [] };
+    filterState = { search: "", globetrotter: [], harmony: [] };
     searchInput.value = "";
     renderActiveFilters();
     renderChampions();
