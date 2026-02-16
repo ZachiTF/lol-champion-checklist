@@ -49,6 +49,31 @@
     <div id="tabs-bar"></div>
     <div id="tab-actions"></div>
 
+    <div id="filter-bar" class="filter-bar">
+      <div class="search-bar-wrapper">
+        <input
+          type="text"
+          id="filter-search"
+          placeholder="Search champions..."
+          autocomplete="off"
+        />
+        <span
+          id="filter-search-clear"
+          class="search-clear-btn"
+          title="Clear search"
+          >×</span
+        >
+      </div>
+      <select id="filter-region">
+        <option value="" disabled selected>Add Region Filter</option>
+      </select>
+      <select id="filter-properties">
+        <option value="" disabled selected>Add Property Filter</option>
+      </select>
+      <button id="filter-reset" class="filter-reset">Clear All</button>
+    </div>
+    <div id="active-filters" class="active-filters"></div>
+
     <div id="champion-grid"></div>
 
     <script src="script.js"></script>

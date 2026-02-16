@@ -108,6 +108,33 @@ let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
 
 let champions = [];
 
+// Champion metadata - loaded from JSON files
+let championRegions = {};
+let championProperties = {};
+
+// Filter state - now supports multiple selections per category
+let filterState = {
+  search: "",
+  regions: [], // Multiple regions
+  properties: [], // Multiple properties
+};
+
+// Get champion metadata
+function getChampionRegion(champId) {
+  return championRegions[champId] || "Unknown";
+}
+
+function getChampionProperties(champId) {
+  const props = [];
+  for (const [propName, propData] of Object.entries(championProperties)) {
+    const champList = propData.champions || propData;
+    if (champList.includes(champId)) {
+      props.push(propName);
+    }
+  }
+  return props;
+}
+
 // --- ELEMENTS ---
 const DEFAULT_COLORS = [
   "#e57373",
@@ -431,12 +458,110 @@ function renderChampions() {
   grid.innerHTML = "";
   const progress = getProgress();
 
-  champions.forEach((champ) => {
-    if (!(champ.id in progress)) {
-      progress[champ.id] = false;
+  // Helper function to filter champions by properties (AND logic)
+  function filterByProperties(champList) {
+    if (filterState.properties.length === 0) return champList;
+
+    return champList.filter((champ) => {
+      const champProps = getChampionProperties(champ.id);
+      // Must have ALL selected properties (AND logic)
+      return filterState.properties.every((prop) => champProps.includes(prop));
+    });
+  }
+
+  // Helper function to filter by search
+  function filterBySearch(champList) {
+    if (!filterState.search) return champList;
+
+    const searchLower = filterState.search.toLowerCase();
+    return champList.filter((champ) =>
+      champ.name.toLowerCase().includes(searchLower),
+    );
+  }
+
+  // If no regions selected, show all champions with property/search filters
+  if (filterState.regions.length === 0) {
+    let filteredChampions = [...champions];
+    filteredChampions = filterBySearch(filteredChampions);
+    filteredChampions = filterByProperties(filteredChampions);
+
+    // Show count
+    const filterCount = document.createElement("div");
+    filterCount.className = "filter-count";
+    filterCount.textContent = `Showing ${filteredChampions.length} of ${champions.length} champions`;
+    filterCount.style.marginBottom = "12px";
+    filterCount.style.fontSize = "0.9em";
+    filterCount.style.opacity = "0.7";
+    if (filteredChampions.length < champions.length) {
+      grid.appendChild(filterCount);
     }
-    grid.appendChild(createChampionCard(champ));
-  });
+
+    filteredChampions.forEach((champ) => {
+      if (!(champ.id in progress)) {
+        progress[champ.id] = false;
+      }
+      grid.appendChild(createChampionCard(champ));
+    });
+  } else {
+    // Multiple regions selected - create separate grid for each region
+    filterState.regions.forEach((selectedRegion, index) => {
+      // Filter champions for this region
+      let regionChampions = champions.filter(
+        (champ) => getChampionRegion(champ.id) === selectedRegion,
+      );
+      regionChampions = filterBySearch(regionChampions);
+      regionChampions = filterByProperties(regionChampions);
+
+      // Create region section
+      const regionSection = document.createElement("div");
+      regionSection.className = "region-section";
+
+      // Create region header with badge
+      const regionHeader = document.createElement("div");
+      regionHeader.className = "region-header";
+
+      const regionBadge = document.createElement("div");
+      regionBadge.className = "filter-badge filter-badge-region";
+      const regionLabel = document.createElement("span");
+      regionLabel.className = "filter-badge-label";
+      regionLabel.textContent = selectedRegion;
+      const regionRemove = document.createElement("span");
+      regionRemove.className = "filter-badge-remove";
+      regionRemove.textContent = "×";
+      regionRemove.onclick = () => {
+        filterState.regions = filterState.regions.filter(
+          (r) => r !== selectedRegion,
+        );
+        renderActiveFilters();
+        renderChampions();
+      };
+      regionBadge.appendChild(regionLabel);
+      regionBadge.appendChild(regionRemove);
+      regionHeader.appendChild(regionBadge);
+
+      // Show count for this region
+      const regionCount = document.createElement("span");
+      regionCount.className = "region-count";
+      regionCount.textContent = `${regionChampions.length} champions`;
+      regionHeader.appendChild(regionCount);
+
+      regionSection.appendChild(regionHeader);
+
+      // Create grid for this region
+      const regionGrid = document.createElement("div");
+      regionGrid.className = "champion-grid-region";
+
+      regionChampions.forEach((champ) => {
+        if (!(champ.id in progress)) {
+          progress[champ.id] = false;
+        }
+        regionGrid.appendChild(createChampionCard(champ));
+      });
+
+      regionSection.appendChild(regionGrid);
+      grid.appendChild(regionSection);
+    });
+  }
 
   saveState();
   updateProgressText();
@@ -446,7 +571,139 @@ function renderAll() {
   renderThemeSwitcher();
   renderTabs();
   renderTabActions();
+  initializeFilters();
   renderChampions();
+}
+
+// --- FILTERS ---
+function renderActiveFilters() {
+  const container = document.getElementById("active-filters");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  // Only render property badges in the active filters area
+  // Region badges are shown inline with their respective grids
+  filterState.properties.forEach((prop) => {
+    const badge = createFilterBadge(prop, "property");
+    container.appendChild(badge);
+  });
+}
+
+function createFilterBadge(value, type) {
+  const badge = document.createElement("div");
+  badge.className = "filter-badge";
+  if (type === "region") badge.classList.add("filter-badge-region");
+  if (type === "property") badge.classList.add("filter-badge-property");
+
+  const label = document.createElement("span");
+  label.className = "filter-badge-label";
+  label.textContent = value;
+
+  const remove = document.createElement("span");
+  remove.className = "filter-badge-remove";
+  remove.textContent = "×";
+  remove.onclick = () => {
+    if (type === "region") {
+      filterState.regions = filterState.regions.filter((r) => r !== value);
+    } else if (type === "property") {
+      filterState.properties = filterState.properties.filter(
+        (p) => p !== value,
+      );
+    }
+    renderActiveFilters();
+    renderChampions();
+  };
+
+  badge.appendChild(label);
+  badge.appendChild(remove);
+  return badge;
+}
+
+function initializeFilters() {
+  const searchInput = document.getElementById("filter-search");
+  const regionSelect = document.getElementById("filter-region");
+  const propertiesSelect = document.getElementById("filter-properties");
+  const resetBtn = document.getElementById("filter-reset");
+
+  const searchClearBtn = document.getElementById("filter-search-clear");
+  if (!searchInput || !regionSelect || !propertiesSelect || !searchClearBtn)
+    return;
+
+  // Populate region dropdown
+  const regions = new Set();
+  champions.forEach((champ) => {
+    const region = getChampionRegion(champ.id);
+    if (region !== "Unknown") regions.add(region);
+  });
+  regionSelect.innerHTML =
+    '<option value="" disabled selected>Add Region Filter</option>';
+  [...regions].sort().forEach((region) => {
+    const opt = document.createElement("option");
+    opt.value = region;
+    opt.textContent = region;
+    regionSelect.appendChild(opt);
+  });
+
+  // Populate properties dropdown
+  const properties = Object.keys(championProperties).sort();
+  propertiesSelect.innerHTML =
+    '<option value="" disabled selected>Add Property Filter</option>';
+  properties.forEach((prop) => {
+    const opt = document.createElement("option");
+    opt.value = prop;
+    opt.textContent = prop;
+    propertiesSelect.appendChild(opt);
+  });
+
+  // Event listeners
+
+  searchInput.addEventListener("input", (e) => {
+    filterState.search = e.target.value;
+    renderChampions();
+    searchClearBtn.style.display = e.target.value ? "inline" : "none";
+  });
+
+  searchClearBtn.onclick = () => {
+    filterState.search = "";
+    searchInput.value = "";
+    searchClearBtn.style.display = "none";
+    renderChampions();
+  };
+  searchClearBtn.style.display = searchInput.value ? "inline" : "none";
+
+  regionSelect.addEventListener("change", (e) => {
+    const value = e.target.value;
+    if (value && !filterState.regions.includes(value)) {
+      filterState.regions.push(value);
+      renderActiveFilters();
+      renderChampions();
+    }
+    // Reset dropdown to placeholder
+    regionSelect.selectedIndex = 0;
+  });
+
+  propertiesSelect.addEventListener("change", (e) => {
+    const value = e.target.value;
+    if (value && !filterState.properties.includes(value)) {
+      filterState.properties.push(value);
+      renderActiveFilters();
+      renderChampions();
+    }
+    // Reset dropdown to placeholder
+    propertiesSelect.selectedIndex = 0;
+  });
+
+  resetBtn.addEventListener("click", () => {
+    filterState = { search: "", regions: [], properties: [] };
+    searchInput.value = "";
+    renderActiveFilters();
+    renderChampions();
+  });
+
+  // Restore current filter values
+  searchInput.value = filterState.search;
+  renderActiveFilters();
 }
 
 // --- THEME SWITCHER ---
@@ -537,14 +794,23 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
     PATCH = versions[0];
     CHAMPION_JSON_URL = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/data/${LANG}/champion.json`;
     CHAMPION_ICON_BASE = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/img/champion/`;
-    // Step 2: Fetch champion data for latest patch
-    return fetch(CHAMPION_JSON_URL);
+
+    // Step 2: Fetch all data in parallel (champion data + metadata)
+    return Promise.all([
+      fetch(CHAMPION_JSON_URL).then((res) => res.json()),
+      fetch("data/champion-regions.json").then((res) => res.json()),
+      fetch("data/champion-properties.json").then((res) => res.json()),
+    ]);
   })
-  .then((res) => res.json())
-  .then((data) => {
-    champions = Object.values(data.data).sort((a, b) =>
+  .then(([championData, regionsData, propertiesData]) => {
+    // Store champion data
+    champions = Object.values(championData.data).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
+
+    // Store metadata
+    championRegions = regionsData;
+    championProperties = propertiesData;
 
     // Migration: Ensure all existing pages have colors
     for (const [id, page] of Object.entries(state.pages)) {
