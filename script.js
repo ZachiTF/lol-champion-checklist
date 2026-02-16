@@ -17,13 +17,21 @@ function populateServerDropdown() {
   const select = document.getElementById("server-select");
   if (!select) return;
   select.innerHTML = "";
+  const labelOpt = document.createElement("option");
+  labelOpt.value = "";
+  labelOpt.textContent = "Region";
+  labelOpt.disabled = true;
+  labelOpt.selected = true;
+  select.appendChild(labelOpt);
   RIOT_SERVERS.forEach((server) => {
     const opt = document.createElement("option");
     opt.value = server.value;
     opt.textContent = server.label;
     select.appendChild(opt);
   });
-  select.value = "euw1";
+
+  // Set default to EUW after label
+  select.selectedIndex = 1;
 
   // Update placeholder dynamically based on selected region
   const searchInput = document.getElementById("summoner-search");

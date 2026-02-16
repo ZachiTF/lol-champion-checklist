@@ -5,16 +5,34 @@
   align-items: center;
   gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.region-select-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .challenge-import select {
-  padding: 8px 14px;
+  padding: 4px 8px;
   border-radius: 6px;
   border: 1px solid #c89b3c;
-  font-size: 1em;
+  font-size: 0.95em;
   background: var(--card-bg);
   color: var(--fg);
   cursor: pointer;
+  min-width: 48px;
+  width: auto;
+  max-width: 80px;
+}
+.region-note {
+  font-size: 0.75em;
+  color: #c89b3c;
+  opacity: 0.85;
+  white-space: nowrap;
 }
 
 .challenge-import input[type="text"] {
@@ -25,6 +43,35 @@
   background: var(--card-bg);
   color: var(--fg);
   min-width: 250px;
+}
+
+@media (max-width: 600px) {
+  .challenge-import {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .challenge-import input[type="text"] {
+    min-width: 0;
+    width: 100%;
+    font-size: 1em;
+    box-sizing: border-box;
+  }
+  .challenge-import .region-select-group,
+  .challenge-import select,
+  .challenge-import button {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .region-select-group {
+    justify-content: flex-start;
+    width: 100%;
+    margin-bottom: 0;
+  }
+  .challenge-import select {
+    max-width: 100%;
+    min-width: 48px;
+  }
 }
 
 .challenge-import button {
