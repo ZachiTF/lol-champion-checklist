@@ -2,13 +2,7 @@
 
 The checklist can be found at the [github page](https://zachitf.github.io/lol-champion-checklist/)  
 
-**For local development:** Opening the HTML file directly won't work due to browser security. Run a local web server instead:
-```bash
-python3 -m http.server 8000
-# Then open http://localhost:8000 in your browser
-```
-
-Progress will be saved in your browser's local storage.
+**For local use:** Simply open `index.html` in your browser. Progress will be saved in your browser's local storage.
 
 ------
 

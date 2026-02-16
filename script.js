@@ -108,9 +108,8 @@ let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
 
 let champions = [];
 
-// Champion metadata - loaded from JSON files
-let championRegions = {};
-let championProperties = {};
+// Champion metadata - loaded from data/*.js files as global constants:
+// CHAMPION_REGIONS and CHAMPION_PROPERTIES
 
 // Filter state - now supports multiple selections per category
 let filterState = {
@@ -121,12 +120,12 @@ let filterState = {
 
 // Get champion metadata
 function getChampionRegion(champId) {
-  return championRegions[champId] || "Unknown";
+  return CHAMPION_REGIONS[champId] || "Unknown";
 }
 
 function getChampionProperties(champId) {
   const props = [];
-  for (const [propName, propData] of Object.entries(championProperties)) {
+  for (const [propName, propData] of Object.entries(CHAMPION_PROPERTIES)) {
     const champList = propData.champions || propData;
     if (champList.includes(champId)) {
       props.push(propName);
@@ -646,7 +645,7 @@ function initializeFilters() {
   });
 
   // Populate properties dropdown
-  const properties = Object.keys(championProperties).sort();
+  const properties = Object.keys(CHAMPION_PROPERTIES).sort();
   propertiesSelect.innerHTML =
     '<option value="" disabled selected>Add Property Filter</option>';
   properties.forEach((prop) => {
@@ -795,22 +794,16 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
     CHAMPION_JSON_URL = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/data/${LANG}/champion.json`;
     CHAMPION_ICON_BASE = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/img/champion/`;
 
-    // Step 2: Fetch all data in parallel (champion data + metadata)
-    return Promise.all([
-      fetch(CHAMPION_JSON_URL).then((res) => res.json()),
-      fetch("data/champion-regions.json").then((res) => res.json()),
-      fetch("data/champion-properties.json").then((res) => res.json()),
-    ]);
+    // Step 2: Fetch champion data (metadata already loaded from JS files)
+    return fetch(CHAMPION_JSON_URL).then((res) => res.json());
   })
-  .then(([championData, regionsData, propertiesData]) => {
+  .then((championData) => {
     // Store champion data
     champions = Object.values(championData.data).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
 
-    // Store metadata
-    championRegions = regionsData;
-    championProperties = propertiesData;
+    // Metadata (CHAMPION_REGIONS and CHAMPION_PROPERTIES) already available from loaded scripts
 
     // Migration: Ensure all existing pages have colors
     for (const [id, page] of Object.entries(state.pages)) {
