@@ -13,6 +13,29 @@ const RIOT_SERVERS = [
   { value: "la2", label: "LAS" },
 ];
 
+const RIOT_API_STORAGE_KEY = "lol_riot_api_key";
+
+function getRiotApiKey() {
+  if (window.APP_CONFIG?.RIOT_API_KEY) {
+    return window.APP_CONFIG.RIOT_API_KEY;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const keyFromUrl = params.get("api");
+
+  if (keyFromUrl) {
+    localStorage.setItem(RIOT_API_STORAGE_KEY, keyFromUrl);
+    params.delete("api");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${
+      nextQuery ? `?${nextQuery}` : ""
+    }${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }
+
+  return localStorage.getItem(RIOT_API_STORAGE_KEY) || "";
+}
+
 function populateServerDropdown() {
   const select = document.getElementById("server-select");
   if (!select) return;
@@ -56,6 +79,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const summoner = document.getElementById("summoner-search").value.trim();
     const server = document.getElementById("server-select").value;
     const status = document.getElementById("challenge-import-status");
+    const apiKey = getRiotApiKey();
+
+    if (!apiKey) {
+      status.textContent =
+        "Riot API key missing. Set localStorage key 'lol_riot_api_key' or open with ?api=YOUR_KEY once.";
+      return;
+    }
+
     if (!summoner) {
       status.textContent = "Enter a summoner name.";
       return;
@@ -66,13 +97,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const summonerRes = await fetch(
         `https://${server}.api.riotgames.com/lol/summoner/v4/summoners/by-name/${encodeURIComponent(
           summoner,
-        )}?api_key=YOUR_API_KEY`,
+        )}?api_key=${encodeURIComponent(apiKey)}`,
       );
       if (!summonerRes.ok) throw new Error("Summoner not found.");
       const summonerData = await summonerRes.json();
       // Step 2: Get Challenge Progress (Adapt to All Situations, challengeId=303001)
       const challengeRes = await fetch(
-        `https://${server}.api.riotgames.com/lol/challenges/v1/player-data/${summonerData.puuid}?api_key=YOUR_API_KEY`,
+        `https://${server}.api.riotgames.com/lol/challenges/v1/player-data/${
+          summonerData.puuid
+        }?api_key=${encodeURIComponent(apiKey)}`,
       );
       if (!challengeRes.ok) throw new Error("Challenge data not found.");
       const challengeData = await challengeRes.json();
