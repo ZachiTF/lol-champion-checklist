@@ -1,16 +1,19 @@
 # Champion Metadata
 
-This directory contains JSON files that define champion metadata for the LoL Champion Checklist application.
+This directory contains generated JavaScript filter files used by the LoL Champion Checklist UI.
 
 ## Files
 
-### `champion-regions.json`
-Maps champion IDs to their lore regions.
+### `globetrotter-filters.js`
+Maps challenge category names (region-style buckets) to champion ID lists.
 
 **Structure:**
-```json
+```js
 {
-  "ChampionId": "RegionName",
+  "Region Name": {
+    description: "Source challenge name",
+    champions: ["ChampionId1", "ChampionId2"]
+  },
   ...
 }
 ```
@@ -32,15 +35,15 @@ Maps champion IDs to their lore regions.
 - Void
 - Zaun
 
-### `champion-properties.json`
-Defines champion properties/abilities that can be used as filters.
+### `harmony-filters.js`
+Defines champion properties/classes that can be used as filters.
 
 **Structure:**
-```json
+```js
 {
   "PropertyName": {
-    "description": "Description of the property",
-    "champions": ["ChampionId1", "ChampionId2", ...]
+    description: "Source challenge name",
+    champions: ["ChampionId1", "ChampionId2", ...]
   },
   ...
 }
@@ -59,22 +62,18 @@ Defines champion properties/abilities that can be used as filters.
 
 ## Maintenance
 
-### Adding a New Champion
-1. Add the champion to `champion-regions.json` with their region
-2. Add the champion to relevant properties in `champion-properties.json`
+These files are generated from `scripts/reference-challenge-data.json` by:
 
-### Adding a New Property
-1. Add a new entry to `champion-properties.json` with:
-   - A descriptive name (used in UI)
-   - A description
-   - An array of champion IDs that have this property
+```bash
+npm run update-data
+```
 
-### Adding a New Region
-Simply add champions with the new region name to `champion-regions.json`. The application will automatically detect and display it in the filter dropdown.
+To change mappings or labels, update:
+- `scripts/reference-challenge-data.json`
+- challenge label maps inside `scripts/update-champion-data.js`
 
 ## Notes
 
-- Champion IDs must match the IDs used by Riot's Data Dragon API
-- Property names are displayed as-is in the UI, so use proper capitalization and spacing
-- The properties are automatically sorted alphabetically in the filter dropdown
-- Regions are automatically sorted alphabetically in the filter dropdown
+- Champion IDs must match Riot Data Dragon champion IDs
+- Filter names are displayed as-is in the UI
+- Filters are sorted alphabetically when generated

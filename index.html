@@ -34,8 +34,8 @@
 
     <div class="wip-notice">
       <strong
-        >Tool is still work in progress; not properly working: champion search,
-        filtering, ...</strong
+        >Unfortunately RIOT API does not support challenges like arena
+        god.</strong
       >
     </div>
 
@@ -85,6 +85,21 @@
 
     <script src="data/globetrotter-filters.js"></script>
     <script src="data/harmony-filters.js"></script>
-    <script src="script.js"></script>
+    <script>
+      window.APP_CONFIG = window.APP_CONFIG || {};
+      (function loadApp() {
+        const loadMain = () => {
+          const appScript = document.createElement("script");
+          appScript.src = "script.js";
+          document.body.appendChild(appScript);
+        };
+
+        const localConfigScript = document.createElement("script");
+        localConfigScript.src = "config.local.js";
+        localConfigScript.onload = loadMain;
+        localConfigScript.onerror = loadMain;
+        document.body.appendChild(localConfigScript);
+      })();
+    </script>
   </body>
 </html>
