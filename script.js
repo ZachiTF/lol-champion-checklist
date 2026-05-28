@@ -214,7 +214,7 @@ function updateProgressText() {
   const total = champions.length;
   const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  progressText.textContent = `Progress: ${done} / ${total}`;
+  progressText.textContent = `Progress: ${done} / ${total} (${percentage}%)`;
 
   // Update progress bar
   const progressBar = document.getElementById("progress-bar");
@@ -272,29 +272,51 @@ function renderTabs() {
   };
 
   tabsBar.appendChild(addTab);
+
+  // Show ⚙ menu button only when there's an active page
+  const menuBtn = document.getElementById("tab-menu-btn");
+  if (menuBtn) {
+    const hasActivePage = !!(state.activePage && state.pages[state.activePage]);
+    menuBtn.classList.toggle("hidden", !hasActivePage);
+    if (!hasActivePage) closeTabMenu();
+  }
 }
 
 function renderTabActions() {
-  const actionsBar = document.getElementById("tab-actions");
-  actionsBar.innerHTML = "";
-  if (!state.activePage || !state.pages[state.activePage]) return;
+  const menu = document.getElementById("tab-actions");
+  menu.innerHTML = "";
+  if (!state.activePage || !state.pages[state.activePage]) {
+    closeTabMenu();
+    return;
+  }
   const page = state.pages[state.activePage];
 
-  // Style the actions bar with the tab color (grayed out)
-  if (page.color) {
-    actionsBar.style.background = shadeColor(page.color, 0.7);
-  } else {
-    actionsBar.style.background = "";
-  }
+  // Menu header: active tab name with color accent
+  const header = document.createElement("div");
+  header.className = "menu-header";
+  const accent = document.createElement("span");
+  accent.className = "header-accent";
+  accent.style.background = page.color || "#e57373";
+  header.appendChild(accent);
+  const headerLabel = document.createElement("span");
+  headerLabel.textContent = page.name;
+  header.appendChild(headerLabel);
+  menu.appendChild(header);
 
-  // Group 1: Color / Rename / Delete
-  const group1 = document.createElement("div");
-  group1.className = "action-group";
+  // Section 1: Color / Rename / Delete
+  const section1 = document.createElement("div");
+  section1.className = "menu-section";
 
-  // Color picker swatch
-  const colorSwatch = document.createElement("label");
+  // Color picker — label wraps a hidden native color input
+  const colorItem = document.createElement("label");
+  colorItem.className = "menu-item menu-item-color";
+  const colorSwatch = document.createElement("span");
   colorSwatch.className = "color-swatch";
   colorSwatch.style.background = page.color || "#e57373";
+  colorItem.appendChild(colorSwatch);
+  const colorLabel = document.createElement("span");
+  colorLabel.textContent = "Color";
+  colorItem.appendChild(colorLabel);
   const colorInput = document.createElement("input");
   colorInput.type = "color";
   colorInput.value = page.color || "#e57373";
@@ -304,135 +326,183 @@ function renderTabActions() {
     saveState();
     renderAll();
   };
-  colorSwatch.appendChild(colorInput);
-  group1.appendChild(colorSwatch);
+  colorItem.appendChild(colorInput);
+  section1.appendChild(colorItem);
 
-  // Rename
-  const renameBtn = document.createElement("button");
-  renameBtn.className = "action";
-  renameBtn.textContent = "Rename";
-  renameBtn.onclick = () => {
-    const newName = prompt("Rename tab:", page.name);
-    if (newName && newName !== page.name) {
-      page.name = newName;
-      saveState();
-      renderAll();
-    }
-  };
-  group1.appendChild(renameBtn);
-
-  // Delete
-  const deleteBtn = document.createElement("button");
-  deleteBtn.className = "action";
-  deleteBtn.textContent = "Delete";
-  deleteBtn.onclick = () => {
-    if (confirm("Delete this tab? This cannot be undone.")) {
-      delete state.pages[state.activePage];
-      // Switch to another tab if any
-      const ids = Object.keys(state.pages);
-      state.activePage = ids.length ? ids[0] : null;
-      saveState();
-      renderAll();
-    }
-  };
-  group1.appendChild(deleteBtn);
-  actionsBar.appendChild(group1);
-
-  // Group 2: Reset Progress / Select All
-  const group2 = document.createElement("div");
-  group2.className = "action-group";
-
-  // Reset
-  const resetBtn = document.createElement("button");
-  resetBtn.className = "action";
-  resetBtn.textContent = "Reset Progress";
-  resetBtn.onclick = () => {
-    if (confirm("Reset progress for this tab?")) {
-      page.progress = {};
-      saveState();
-      renderAll();
-    }
-  };
-  group2.appendChild(resetBtn);
-
-  // Select All
-  const selectAllBtn = document.createElement("button");
-  selectAllBtn.className = "action";
-  selectAllBtn.textContent = "Select All";
-  selectAllBtn.onclick = () => {
-    if (confirm("Mark all champions as done for this tab?")) {
-      for (const champ of champions) {
-        page.progress[champ.id] = true;
+  section1.appendChild(
+    createMenuItem("✏", "Rename", () => {
+      const newName = prompt("Rename tab:", page.name);
+      if (newName && newName !== page.name) {
+        page.name = newName;
+        saveState();
+        renderAll();
       }
-      saveState();
-      renderAll();
-    }
-  };
-  group2.appendChild(selectAllBtn);
-  actionsBar.appendChild(group2);
+    }),
+  );
 
-  // Group 3: Export / Import
-  const group3 = document.createElement("div");
-  group3.className = "action-group";
-
-  // Export
-  const exportBtn = document.createElement("button");
-  exportBtn.className = "action";
-  exportBtn.textContent = "Export";
-  exportBtn.onclick = () => {
-    const blob = new Blob([JSON.stringify(page, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${page.name.replace(/[^a-z0-9]/gi, "_")}_lol_page.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  group3.appendChild(exportBtn);
-
-  // Import
-  const importBtn = document.createElement("button");
-  importBtn.className = "action";
-  importBtn.textContent = "Import";
-  importBtn.onclick = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const imported = JSON.parse(ev.target.result);
-          if (imported.name && imported.progress) {
-            const id = crypto.randomUUID();
-            // Ensure imported page has a color
-            if (!imported.color) {
-              imported.color = getNextColor();
-            }
-            state.pages[id] = imported;
-            state.activePage = id;
-            saveState();
-            renderAll();
-          } else {
-            alert("Invalid file format.");
-          }
-        } catch {
-          alert("Failed to import file.");
+  section1.appendChild(
+    createMenuItem(
+      "🗑",
+      "Delete tab",
+      () => {
+        if (confirm("Delete this tab? This cannot be undone.")) {
+          delete state.pages[state.activePage];
+          const ids = Object.keys(state.pages);
+          state.activePage = ids.length ? ids[0] : null;
+          saveState();
+          renderAll();
         }
+      },
+      { danger: true },
+    ),
+  );
+  menu.appendChild(section1);
+
+  // Section 2: Reset Progress / Select All
+  const section2 = document.createElement("div");
+  section2.className = "menu-section";
+
+  section2.appendChild(
+    createMenuItem("↺", "Reset progress", () => {
+      if (confirm("Reset progress for this tab?")) {
+        page.progress = {};
+        saveState();
+        renderAll();
+      }
+    }),
+  );
+
+  section2.appendChild(
+    createMenuItem("✓", "Select all", () => {
+      if (confirm("Mark all champions as done for this tab?")) {
+        for (const champ of champions) {
+          page.progress[champ.id] = true;
+        }
+        saveState();
+        renderAll();
+      }
+    }),
+  );
+  menu.appendChild(section2);
+
+  // Section 3: Export / Import
+  const section3 = document.createElement("div");
+  section3.className = "menu-section";
+
+  section3.appendChild(
+    createMenuItem("↑", "Export", () => {
+      const blob = new Blob([JSON.stringify(page, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${page.name.replace(/[^a-z0-9]/gi, "_")}_lol_page.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }),
+  );
+
+  section3.appendChild(
+    createMenuItem("↓", "Import", () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json";
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const imported = JSON.parse(ev.target.result);
+            if (imported.name && imported.progress) {
+              const id = crypto.randomUUID();
+              if (!imported.color) {
+                imported.color = getNextColor();
+              }
+              state.pages[id] = imported;
+              state.activePage = id;
+              saveState();
+              renderAll();
+            } else {
+              alert("Invalid file format.");
+            }
+          } catch {
+            alert("Failed to import file.");
+          }
+        };
+        reader.readAsText(file);
       };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-  group3.appendChild(importBtn);
-  actionsBar.appendChild(group3);
+      input.click();
+    }),
+  );
+  menu.appendChild(section3);
 }
+
+function createMenuItem(icon, label, onClick, opts = {}) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item" + (opts.danger ? " menu-item-danger" : "");
+  item.setAttribute("role", "menuitem");
+  const iconEl = document.createElement("span");
+  iconEl.className = "menu-icon";
+  iconEl.textContent = icon;
+  item.appendChild(iconEl);
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  item.appendChild(labelEl);
+  item.onclick = onClick;
+  return item;
+}
+
+// --- TAB MENU OPEN/CLOSE CONTROLLER ---
+function openTabMenu() {
+  const menu = document.getElementById("tab-actions");
+  const btn = document.getElementById("tab-menu-btn");
+  if (!menu || !btn) return;
+  menu.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+}
+
+function closeTabMenu() {
+  const menu = document.getElementById("tab-actions");
+  const btn = document.getElementById("tab-menu-btn");
+  if (!menu || !btn) return;
+  menu.classList.remove("open");
+  btn.setAttribute("aria-expanded", "false");
+}
+
+function toggleTabMenu() {
+  const menu = document.getElementById("tab-actions");
+  if (!menu) return;
+  if (menu.classList.contains("open")) closeTabMenu();
+  else openTabMenu();
+}
+
+// Wire up the ⚙ button + outside-click + Escape
+(function initTabMenuController() {
+  const btn = document.getElementById("tab-menu-btn");
+  if (btn) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleTabMenu();
+    });
+  }
+
+  document.addEventListener("mousedown", (e) => {
+    const menu = document.getElementById("tab-actions");
+    const trigger = document.getElementById("tab-menu-btn");
+    if (!menu || !menu.classList.contains("open")) return;
+    if (menu.contains(e.target) || trigger?.contains(e.target)) return;
+    closeTabMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeTabMenu();
+  });
+})();
 
 // --- UTILITY FUNCTIONS ---
 // Shade color to create a grayed-out version

@@ -148,8 +148,8 @@ body {
 /* Header */
 .page-header {
   text-align: center;
-  padding: 40px 20px 30px;
-  margin: -20px -20px 30px -20px;
+  padding: 36px 20px 0;
+  margin: -20px -20px 24px -20px;
   background: linear-gradient(
     135deg,
     rgba(200, 155, 60, 0.1) 0%,
@@ -171,8 +171,8 @@ body {
 }
 
 h1 {
-  margin: 0 0 12px 0;
-  font-size: 32px;
+  margin: 0 0 14px 0;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: -0.5px;
   color: var(--fg, #e6e6e6);
@@ -184,26 +184,26 @@ h1 .highlight {
 }
 
 #progress {
-  margin: 0 0 10px 0;
-  font-size: 16px;
+  margin: 0 0 12px 0;
+  font-size: 18px;
   font-weight: 600;
-  color: rgba(200, 155, 60, 0.9);
+  color: rgba(200, 155, 60, 0.95);
   letter-spacing: 0.5px;
 }
 
 .progress-info {
-  max-width: 400px;
-  margin: 0 auto;
+  max-width: 520px;
+  margin: 0 auto 22px auto;
 }
 
 .progress-bar-container {
   width: 100%;
-  height: 8px;
+  height: 14px;
   background: rgba(0, 0, 0, 0.5);
-  border-radius: 4px;
+  border-radius: 7px;
   overflow: hidden;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(200, 155, 60, 0.2);
+  border: 1px solid rgba(200, 155, 60, 0.25);
 }
 
 .progress-bar {
@@ -211,7 +211,7 @@ h1 .highlight {
   width: 0%;
   background: linear-gradient(90deg, #c89b3c 0%, #f0e6d2 50%, #c89b3c 100%);
   background-size: 200% 100%;
-  border-radius: 4px;
+  border-radius: 7px;
   transition: width 0.5s ease;
   box-shadow:
     0 0 12px rgba(200, 155, 60, 0.7),
@@ -278,27 +278,53 @@ body.summoner-search-hidden .wip-notice {
   display: none;
 }
 
-/* Tabs Bar */
+/* Tab Strip (inside header) */
+.tab-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 16px;
+  margin: 0 -20px;
+}
+
 #tabs-bar {
   display: flex;
   gap: 4px;
-  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+#tabs-bar::-webkit-scrollbar {
+  height: 4px;
+}
+#tabs-bar::-webkit-scrollbar-thumb {
+  background: rgba(200, 155, 60, 0.3);
+  border-radius: 2px;
 }
 
 .tab {
-  padding: 6px 12px;
+  padding: 8px 16px;
   background: var(--tab, #151a23);
-  border-radius: 4px 4px 0 0;
+  border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
   opacity: 0.7;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition:
     background 0.2s,
-    opacity 0.2s;
+    opacity 0.2s,
+    transform 0.15s;
 }
 
 .tab:hover {
-  opacity: 0.85;
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .tab.active {
@@ -306,98 +332,183 @@ body.summoner-search-hidden .wip-notice {
   background: var(--tab-active, #1f2633);
   position: relative;
   z-index: 2;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .tab.add {
   font-weight: bold;
+  opacity: 0.6;
 }
 
-/* Tab Actions Row */
-#tab-actions {
+.tab.add:hover {
+  opacity: 1;
+}
+
+/* Tab settings (⚙) button */
+.tab-menu-btn {
+  flex-shrink: 0;
+  background: var(--card-bg, #151a23);
+  border: 1px solid rgba(200, 155, 60, 0.3);
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+  width: 38px;
+  height: 36px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 15px;
   align-items: center;
-  border-radius: 0 4px 12px 12px;
-  min-height: 42px;
-  transition: background 0.2s;
-  background: var(--tab-action, #232b3a);
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+  font-size: 16px;
+  transition: all 0.2s;
+  margin-bottom: 2px;
+}
+
+.tab-menu-btn:hover {
+  background: var(--card-hover, #1f2633);
+  border-color: rgba(200, 155, 60, 0.6);
+}
+
+.tab-menu-btn[aria-expanded="true"] {
+  background: var(--card-hover, #1f2633);
+  border-color: rgba(200, 155, 60, 0.7);
+}
+
+.tab-menu-btn.hidden {
+  display: none;
+}
+
+/* Tab Actions Dropdown Menu */
+.tab-actions-menu {
+  display: none;
+  position: absolute;
+  right: 16px;
+  top: 100%;
+  margin-top: 6px;
+  min-width: 240px;
+  max-width: calc(100vw - 32px);
+  background: var(--card-bg, #151a23);
+  border: 1px solid rgba(200, 155, 60, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 6px 0;
+  z-index: 90;
+  text-align: left;
+  overflow: hidden;
+}
+
+.tab-actions-menu.open {
+  display: block;
+}
+
+.tab-actions-menu .menu-header {
+  padding: 10px 14px 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: rgba(200, 155, 60, 0.9);
+  border-bottom: 1px solid rgba(200, 155, 60, 0.2);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-actions-menu .menu-header .header-accent {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.tab-actions-menu .menu-section {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+.tab-actions-menu .menu-section + .menu-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.tab-actions-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s;
+}
+
+.tab-actions-menu .menu-item:hover,
+.tab-actions-menu .menu-item:focus-visible {
+  background: rgba(200, 155, 60, 0.12);
+  outline: none;
+}
+
+.tab-actions-menu .menu-item .menu-icon {
+  width: 18px;
+  text-align: center;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.tab-actions-menu .menu-item.menu-item-danger:hover {
+  background: rgba(220, 80, 80, 0.15);
+  color: #ff9090;
+}
+
+/* Color picker menu row */
+.tab-actions-menu .menu-item-color {
+  position: relative;
+}
+
+.tab-actions-menu .menu-item-color .color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.tab-actions-menu .menu-item-color input[type="color"] {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
 }
 
 @media (max-width: 600px) {
-  #tab-actions {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    padding: 10px 4px;
+  .tab-strip {
+    padding: 0 8px;
+    margin: 0 -20px;
   }
-  #tab-actions .action-group {
-    gap: 8px;
-    padding: 0;
-    border-left: none;
-    border-top: 2px solid rgba(255, 255, 255, 0.08);
-    margin-top: 6px;
+  .tab {
+    padding: 8px 12px;
   }
-  #tab-actions .action-group:first-of-type {
-    border-top: none;
-    margin-top: 0;
+  .tab-actions-menu {
+    right: 8px;
+    left: 8px;
+    max-width: none;
+    min-width: 0;
   }
-}
-
-#tab-actions .action-group {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 0 8px;
-  border-left: 2px solid rgba(255, 255, 255, 0.1);
-}
-
-#tab-actions .action-group:first-of-type {
-  border-left: none;
-  padding-left: 0;
-}
-
-#tab-actions .color-swatch {
-  display: inline-block;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  margin-right: 10px;
-  position: relative;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  cursor: pointer;
-}
-
-#tab-actions .color-swatch input[type="color"] {
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  left: 0;
-  top: 0;
-  cursor: pointer;
-}
-
-#tab-actions .action {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-  padding: 5px 10px;
-  cursor: pointer;
-  font-size: 13px;
-  opacity: 0.9;
-  border: none;
-  color: inherit;
-  transition:
-    background 0.2s,
-    opacity 0.2s;
-}
-
-#tab-actions .action:hover {
-  background: rgba(0, 0, 0, 0.3);
-  opacity: 1;
+  .tab-actions-menu .menu-item {
+    padding: 12px 16px;
+    font-size: 15px;
+  }
 }
 
 /* Filter Bar */
