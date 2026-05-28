@@ -458,12 +458,52 @@ function createMenuItem(icon, label, onClick, opts = {}) {
 }
 
 // --- TAB MENU OPEN/CLOSE CONTROLLER ---
+const MOBILE_BREAKPOINT = 600;
+
+function positionTabMenu() {
+  const menu = document.getElementById("tab-actions");
+  const btn = document.getElementById("tab-menu-btn");
+  if (!menu || !btn || !menu.classList.contains("open")) return;
+
+  // On narrow viewports let the CSS rule (edge-to-edge) take over
+  if (window.innerWidth <= MOBILE_BREAKPOINT) {
+    menu.style.left = "";
+    menu.style.right = "";
+    return;
+  }
+
+  // Measure naturally first
+  menu.style.left = "0px";
+  menu.style.right = "auto";
+
+  const btnRect = btn.getBoundingClientRect();
+  const parent = menu.offsetParent || document.body;
+  const parentRect = parent.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth;
+  const viewportWidth = window.innerWidth;
+  const margin = 8;
+
+  // Prefer aligning menu's left edge under the button
+  let leftViewport = btnRect.left;
+
+  // If overflowing right viewport edge, shift left to fit
+  if (leftViewport + menuWidth + margin > viewportWidth) {
+    leftViewport = viewportWidth - menuWidth - margin;
+  }
+  // Clamp to left margin
+  if (leftViewport < margin) leftViewport = margin;
+
+  menu.style.left = `${leftViewport - parentRect.left}px`;
+  menu.style.right = "auto";
+}
+
 function openTabMenu() {
   const menu = document.getElementById("tab-actions");
   const btn = document.getElementById("tab-menu-btn");
   if (!menu || !btn) return;
   menu.classList.add("open");
   btn.setAttribute("aria-expanded", "true");
+  positionTabMenu();
 }
 
 function closeTabMenu() {
@@ -472,6 +512,8 @@ function closeTabMenu() {
   if (!menu || !btn) return;
   menu.classList.remove("open");
   btn.setAttribute("aria-expanded", "false");
+  menu.style.left = "";
+  menu.style.right = "";
 }
 
 function toggleTabMenu() {
@@ -502,6 +544,8 @@ function toggleTabMenu() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeTabMenu();
   });
+
+  window.addEventListener("resize", positionTabMenu);
 })();
 
 // --- UTILITY FUNCTIONS ---

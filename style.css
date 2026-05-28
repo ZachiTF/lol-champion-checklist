@@ -149,7 +149,7 @@ body {
 .page-header {
   text-align: center;
   padding: 36px 20px 0;
-  margin: -20px -20px 24px -20px;
+  margin: -20px -20px 20px -20px;
   background: linear-gradient(
     135deg,
     rgba(200, 155, 60, 0.1) 0%,
@@ -171,7 +171,7 @@ body {
 }
 
 h1 {
-  margin: 0 0 14px 0;
+  margin: 0 0 28px 0;
   font-size: 30px;
   font-weight: 700;
   letter-spacing: -0.5px;
@@ -189,11 +189,13 @@ h1 .highlight {
   font-weight: 600;
   color: rgba(200, 155, 60, 0.95);
   letter-spacing: 0.5px;
+  text-align: center;
 }
 
 .progress-info {
-  max-width: 520px;
-  margin: 0 auto 22px auto;
+  max-width: 600px;
+  margin: 4px auto 24px auto;
+  padding: 0 4px;
 }
 
 .progress-bar-container {
@@ -282,7 +284,7 @@ body.summoner-search-hidden .wip-notice {
 .tab-strip {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 38px;
   padding: 0 16px;
   margin: 0 -20px;
 }
@@ -290,7 +292,7 @@ body.summoner-search-hidden .wip-notice {
 #tabs-bar {
   display: flex;
   gap: 4px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -381,11 +383,11 @@ body.summoner-search-hidden .wip-notice {
 .tab-actions-menu {
   display: none;
   position: absolute;
-  right: 16px;
   top: 100%;
+  left: 0;
   margin-top: 6px;
   min-width: 240px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - 16px);
   background: var(--card-bg, #151a23);
   border: 1px solid rgba(200, 155, 60, 0.35);
   border-radius: 10px;
