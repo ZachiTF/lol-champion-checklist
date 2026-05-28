@@ -792,6 +792,23 @@ function renderThemeSwitcher() {
     renderThemeSwitcher();
   };
   bar.appendChild(animBtn);
+
+  // Summoner search toggle button
+  const summonerVisible = localStorage.getItem("lol_summoner_search") === "true";
+  const summonerBtn = document.createElement("button");
+  summonerBtn.className =
+    "summoner-toggle" + (summonerVisible ? "" : " disabled");
+  summonerBtn.textContent = "🔍";
+  summonerBtn.title = `Summoner search: ${
+    summonerVisible ? "On" : "Off"
+  } (click to toggle)`;
+  summonerBtn.onclick = () => {
+    const newState = !summonerVisible;
+    localStorage.setItem("lol_summoner_search", newState);
+    document.body.classList.toggle("summoner-search-hidden", !newState);
+    renderThemeSwitcher();
+  };
+  bar.appendChild(summonerBtn);
 }
 
 // --- MAIN ---
@@ -801,6 +818,10 @@ setTheme(localStorage.getItem("lol_theme") || "auto");
 // Initialize animations (off by default for better performance)
 const animationsEnabled = localStorage.getItem("lol_animations") === "true";
 document.body.classList.toggle("animations-enabled", animationsEnabled);
+
+// Initialize summoner search (hidden by default — feature requires API key)
+const summonerSearchVisible = localStorage.getItem("lol_summoner_search") === "true";
+document.body.classList.toggle("summoner-search-hidden", !summonerSearchVisible);
 
 // Listen for system theme changes when in auto mode
 window
