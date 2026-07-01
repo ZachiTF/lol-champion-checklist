@@ -380,6 +380,7 @@ function renderTabActions() {
         }
         saveState();
         renderAll();
+        window.Celebrations?.check(champions, page.progress, null);
       }
     }),
   );
@@ -586,10 +587,12 @@ function createChampionCard(champ) {
   div.appendChild(name);
 
   div.onclick = () => {
-    progress[champ.id] = !progress[champ.id];
+    const nowDone = !progress[champ.id];
+    progress[champ.id] = nowDone;
     div.classList.toggle("done");
     saveState();
     updateProgressText();
+    if (nowDone) window.Celebrations?.check(champions, progress, champ);
   };
 
   return div;
@@ -896,7 +899,7 @@ function renderThemeSwitcher() {
   animBtn.className =
     "animation-toggle" + (animationsEnabled ? "" : " disabled");
   animBtn.textContent = "✨";
-  animBtn.title = `Animations: ${
+  animBtn.title = `Effects & celebrations: ${
     animationsEnabled ? "On" : "Off"
   } (click to toggle)`;
   animBtn.onclick = () => {
@@ -929,8 +932,8 @@ function renderThemeSwitcher() {
 // Initialize theme on load
 setTheme(localStorage.getItem("lol_theme") || "auto");
 
-// Initialize animations (off by default for better performance)
-const animationsEnabled = localStorage.getItem("lol_animations") === "true";
+// Initialize animations & celebrations (on by default)
+const animationsEnabled = localStorage.getItem("lol_animations") !== "false";
 document.body.classList.toggle("animations-enabled", animationsEnabled);
 
 // Initialize summoner search (hidden by default — feature requires API key)
