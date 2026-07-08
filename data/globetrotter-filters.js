@@ -1,5 +1,5 @@
 // Auto-generated from curated challenge reference data
-// Last updated: 2026-02-16T11:57:48.753Z
+// Last updated: 2026-07-08T19:52:30.958Z
 // Run: npm run update-data
 
 const GLOBETROTTER_FILTERS = {
@@ -20,10 +20,10 @@ const GLOBETROTTER_FILTERS = {
       "Veigar",
       "Vex",
       "Yuumi",
-      "Ziggs",
+      "Ziggs"
     ],
   },
-  Bilgewater: {
+  "Bilgewater": {
     description: "All Hands on Deck",
     champions: [
       "Fizz",
@@ -35,10 +35,10 @@ const GLOBETROTTER_FILTERS = {
       "Nilah",
       "Pyke",
       "TahmKench",
-      "TwistedFate",
+      "TwistedFate"
     ],
   },
-  Demacia: {
+  "Demacia": {
     description: "FOR DEMACIA",
     champions: [
       "Fiora",
@@ -55,10 +55,10 @@ const GLOBETROTTER_FILTERS = {
       "Sona",
       "Sylas",
       "Vayne",
-      "XinZhao",
+      "XinZhao"
     ],
   },
-  Freljord: {
+  "Freljord": {
     description: "Ice, Ice, Baby",
     champions: [
       "Anivia",
@@ -75,10 +75,10 @@ const GLOBETROTTER_FILTERS = {
       "Trundle",
       "Tryndamere",
       "Udyr",
-      "Volibear",
+      "Volibear"
     ],
   },
-  Ionia: {
+  "Ionia": {
     description: "Everybody was Wuju Fighting",
     champions: [
       "Ahri",
@@ -102,10 +102,10 @@ const GLOBETROTTER_FILTERS = {
       "Xayah",
       "Yasuo",
       "Yone",
-      "Zed",
+      "Zed"
     ],
   },
-  Ixtal: {
+  "Ixtal": {
     description: "Elemental, My Dear Watson",
     champions: [
       "Malphite",
@@ -115,10 +115,10 @@ const GLOBETROTTER_FILTERS = {
       "Qiyana",
       "Rengar",
       "Skarner",
-      "Zyra",
+      "Zyra"
     ],
   },
-  Noxus: {
+  "Noxus": {
     description: "Strength Above All",
     champions: [
       "Briar",
@@ -135,10 +135,10 @@ const GLOBETROTTER_FILTERS = {
       "Sion",
       "Swain",
       "Talon",
-      "Vladimir",
+      "Vladimir"
     ],
   },
-  Piltover: {
+  "Piltover": {
     description: "Calculated",
     champions: [
       "Caitlyn",
@@ -149,7 +149,7 @@ const GLOBETROTTER_FILTERS = {
       "Jayce",
       "Orianna",
       "Seraphine",
-      "Vi",
+      "Vi"
     ],
   },
   "Shadow Isles": {
@@ -166,10 +166,10 @@ const GLOBETROTTER_FILTERS = {
       "Thresh",
       "Vex",
       "Viego",
-      "Yorick",
+      "Yorick"
     ],
   },
-  Shurima: {
+  "Shurima": {
     description: "The Sun Disc Never Sets",
     champions: [
       "Akshan",
@@ -183,10 +183,10 @@ const GLOBETROTTER_FILTERS = {
       "Sivir",
       "Taliyah",
       "Xerath",
-      "Zilean",
+      "Zilean"
     ],
   },
-  Targon: {
+  "Targon": {
     description: "Peak Performance",
     champions: [
       "Aphelios",
@@ -196,10 +196,10 @@ const GLOBETROTTER_FILTERS = {
       "Pantheon",
       "Soraka",
       "Taric",
-      "Zoe",
+      "Zoe"
     ],
   },
-  Void: {
+  "Void": {
     description: "(Inhuman Screeching Sounds)",
     champions: [
       "Belveth",
@@ -210,10 +210,10 @@ const GLOBETROTTER_FILTERS = {
       "KogMaw",
       "Malzahar",
       "RekSai",
-      "Velkoz",
+      "Velkoz"
     ],
   },
-  Zaun: {
+  "Zaun": {
     description: "Chemtech Comrades",
     champions: [
       "Blitzcrank",
@@ -229,7 +229,7 @@ const GLOBETROTTER_FILTERS = {
       "Warwick",
       "Zac",
       "Zeri",
-      "Ziggs",
+      "Ziggs"
     ],
   },
 };

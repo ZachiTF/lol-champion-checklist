@@ -1,5 +1,5 @@
 // Auto-generated from curated challenge reference data
-// Last updated: 2026-02-16T11:57:48.782Z
+// Last updated: 2026-07-08T19:52:30.970Z
 // Run: npm run update-data
 
 const HARMONY_FILTERS = {
@@ -41,10 +41,10 @@ const HARMONY_FILTERS = {
       "Taric",
       "Thresh",
       "Yuumi",
-      "Zilean",
+      "Zilean"
     ],
   },
-  Assassin: {
+  "Assassin": {
     description: "assassin",
     champions: [
       "Ahri",
@@ -90,7 +90,7 @@ const HARMONY_FILTERS = {
       "Viego",
       "Yasuo",
       "Yone",
-      "Zed",
+      "Zed"
     ],
   },
   "Crowd Control": {
@@ -149,10 +149,10 @@ const HARMONY_FILTERS = {
       "Yasuo",
       "Yone",
       "Zac",
-      "Zyra",
+      "Zyra"
     ],
   },
-  Displacements: {
+  "Displacements": {
     description: "Get Over Here",
     champions: [
       "Alistar",
@@ -188,10 +188,10 @@ const HARMONY_FILTERS = {
       "XinZhao",
       "Yone",
       "Zac",
-      "Ziggs",
+      "Ziggs"
     ],
   },
-  Fighter: {
+  "Fighter": {
     description: "fighter",
     champions: [
       "Aatrox",
@@ -251,10 +251,10 @@ const HARMONY_FILTERS = {
       "Yasuo",
       "Yone",
       "Yorick",
-      "Zac",
+      "Zac"
     ],
   },
-  Global: {
+  "Global": {
     description: "Nowhere to Hide",
     champions: [
       "Akshan",
@@ -288,10 +288,10 @@ const HARMONY_FILTERS = {
       "TwistedFate",
       "Vex",
       "Xerath",
-      "Ziggs",
+      "Ziggs"
     ],
   },
-  Mage: {
+  "Mage": {
     description: "mage",
     champions: [
       "Ahri",
@@ -367,10 +367,10 @@ const HARMONY_FILTERS = {
       "Ziggs",
       "Zilean",
       "Zoe",
-      "Zyra",
+      "Zyra"
     ],
   },
-  Marksman: {
+  "Marksman": {
     description: "marksman",
     champions: [
       "Akshan",
@@ -404,10 +404,10 @@ const HARMONY_FILTERS = {
       "Varus",
       "Vayne",
       "Xayah",
-      "Zeri",
+      "Zeri"
     ],
   },
-  Poke: {
+  "Poke": {
     description: "We're Good Over Here",
     champions: [
       "Akshan",
@@ -449,7 +449,7 @@ const HARMONY_FILTERS = {
       "Yuumi",
       "Zeri",
       "Ziggs",
-      "Zoe",
+      "Zoe"
     ],
   },
   "Revive/Immunity": {
@@ -492,10 +492,10 @@ const HARMONY_FILTERS = {
       "Yuumi",
       "Zac",
       "Zed",
-      "Zilean",
+      "Zilean"
     ],
   },
-  Stealth: {
+  "Stealth": {
     description: "Where'd They Go?",
     champions: [
       "Akali",
@@ -516,10 +516,10 @@ const HARMONY_FILTERS = {
       "Teemo",
       "Twitch",
       "Vayne",
-      "Viego",
+      "Viego"
     ],
   },
-  Summoner: {
+  "Summoner": {
     description: "Summoners on the Rift",
     champions: [
       "Annie",
@@ -541,10 +541,10 @@ const HARMONY_FILTERS = {
       "Shaco",
       "Yorick",
       "Zed",
-      "Zyra",
+      "Zyra"
     ],
   },
-  Support: {
+  "Support": {
     description: "support",
     champions: [
       "Alistar",
@@ -588,10 +588,10 @@ const HARMONY_FILTERS = {
       "Xerath",
       "Yuumi",
       "Zilean",
-      "Zyra",
+      "Zyra"
     ],
   },
-  Tank: {
+  "Tank": {
     description: "tank",
     champions: [
       "Alistar",
@@ -638,10 +638,10 @@ const HARMONY_FILTERS = {
       "Warwick",
       "XinZhao",
       "Yorick",
-      "Zac",
+      "Zac"
     ],
   },
-  Terrain: {
+  "Terrain": {
     description: "I'm Helping",
     champions: [
       "Anivia",
@@ -654,10 +654,10 @@ const HARMONY_FILTERS = {
       "Taliyah",
       "Trundle",
       "Veigar",
-      "Yorick",
+      "Yorick"
     ],
   },
-  Trap: {
+  "Trap": {
     description: "It's a Trap!",
     champions: [
       "Caitlyn",
@@ -669,7 +669,7 @@ const HARMONY_FILTERS = {
       "Shaco",
       "Teemo",
       "Ziggs",
-      "Zyra",
+      "Zyra"
     ],
   },
   "Ultimate AOE": {
@@ -755,7 +755,7 @@ const HARMONY_FILTERS = {
       "Zac",
       "Zeri",
       "Ziggs",
-      "Zyra",
+      "Zyra"
     ],
   },
 };
