@@ -118,6 +118,9 @@
   --tab-action: #f0f0f0;
   --card-bg: #fff;
   --card-hover: #f5f5f5;
+  --chart-gold: #a8842f;
+  --muted-fg: rgba(24, 24, 24, 0.6);
+  --hairline: rgba(24, 24, 24, 0.15);
 }
 
 .theme-dark {
@@ -128,6 +131,9 @@
   --tab-action: #232b3a;
   --card-bg: #151a23;
   --card-hover: #1f2633;
+  --chart-gold: #b18a2a;
+  --muted-fg: rgba(230, 230, 230, 0.55);
+  --hairline: rgba(230, 230, 230, 0.14);
 }
 
 body {
@@ -782,6 +788,148 @@ body.summoner-search-hidden .wip-notice {
 
 .champion.done img {
   filter: grayscale(100%);
+}
+
+/* Progress History (timeline) */
+.history-box {
+  position: relative;
+  margin-top: 24px;
+  padding: 16px 18px 14px;
+  background: var(--card-bg, #151a23);
+  border: 1px solid rgba(200, 155, 60, 0.15);
+  border-radius: 8px;
+}
+
+.history-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.history-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: rgba(200, 155, 60, 0.9);
+}
+
+.history-summary {
+  font-size: 0.85em;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+.history-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 96px;
+  border-bottom: 1px solid var(--hairline, rgba(230, 230, 230, 0.14));
+}
+
+.history-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 4px 4px 0 0;
+}
+
+.history-slot:focus-visible {
+  outline: 2px solid var(--chart-gold, #b18a2a);
+  outline-offset: 1px;
+}
+
+.history-bar {
+  width: 100%;
+  max-width: 24px;
+  background: var(--chart-gold, #b18a2a);
+  border-radius: 4px 4px 0 0;
+}
+
+.history-slot:hover .history-bar,
+.history-slot:focus-visible .history-bar {
+  filter: brightness(1.2);
+}
+
+.history-empty {
+  align-self: center;
+  width: 100%;
+  text-align: center;
+  font-size: 0.9em;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+.history-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.75em;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+.history-axis:empty {
+  display: none;
+}
+
+.history-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
+  padding: 8px 12px;
+  background: var(--card-bg, #151a23);
+  border: 1px solid rgba(200, 155, 60, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 0.85em;
+  pointer-events: none;
+}
+
+.history-tooltip.visible {
+  display: flex;
+}
+
+.history-tooltip strong {
+  font-size: 1.05em;
+}
+
+.history-tooltip .tooltip-names {
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+.history-recent {
+  margin-top: 14px;
+}
+
+.history-recent-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+  margin-bottom: 6px;
+}
+
+.history-recent-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 0.9em;
+  border-top: 1px solid var(--hairline, rgba(230, 230, 230, 0.14));
+}
+
+.history-recent-row .recent-date {
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+  white-space: nowrap;
 }
 
 /* Achievement Banner (celebration easter eggs) */

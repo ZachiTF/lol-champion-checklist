@@ -3,3 +3,4 @@ node_modules/
 .env.*
 config.local.js
 .DS_Store
+test-history-import.json
