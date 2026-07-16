@@ -9,6 +9,10 @@ Live site: https://zachitf.github.io/lol-champion-checklist/
 - Tracks champion completion per tab/page
 - Supports multiple pages (for different goals/accounts)
 - Filters by Globetrotter and Harmony groups
+- Shows each champion's Globetrotter region (with official crest) and Harmony
+  groups on hover, keyboard focus, or long-press (touch)
+- Celebrates milestones with confetti (100%, finishing a region, finishing a
+  starting letter)
 - Exports/imports tab progress as JSON
 - Stores everything in browser local storage
 
@@ -71,7 +75,7 @@ If you want public usage, put Riot API calls behind a backend/proxy (Cloudflare 
 
 ## Updating filter data
 
-Filter data is generated from `scripts/reference-challenge-data.json` into:
+Filter data is generated into:
 
 - `data/globetrotter-filters.js`
 - `data/harmony-filters.js`
@@ -81,6 +85,11 @@ Run:
 ```bash
 npm run update-data
 ```
+
+If the League client is running, the script pulls the live challenge champion
+lists from the LCU API and refreshes `scripts/reference-challenge-data.json`
+first — do this after new champion releases. Without the client it falls back
+to the committed snapshot. See `data/README.md` for details.
 
 ## Repo structure
 
