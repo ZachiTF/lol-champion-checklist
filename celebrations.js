@@ -75,8 +75,26 @@ window.Celebrations = (function () {
     });
   }
 
-  // Transient banner pinned to the bottom of the page.
-  function showBanner(message, variant) {
+  // Twin gold cannons for completing a Globetrotter region — bigger than the
+  // letter cheer, but short of the 100% rainbow finale.
+  function fireRegion() {
+    if (!hasConfetti()) return;
+    [60, 120].forEach((angle, i) => {
+      window.confetti({
+        particleCount: 70,
+        angle,
+        spread: 65,
+        startVelocity: 45,
+        origin: { x: i, y: 0.8 },
+        colors: GOLD_SHADES,
+        disableForReducedMotion: true,
+      });
+    });
+  }
+
+  // Transient banner pinned to the bottom of the page. `iconUrl` optionally
+  // prepends an image (e.g. a region crest) to the message.
+  function showBanner(message, variant, iconUrl) {
     // Replace any existing banner so they don't stack.
     const existing = document.querySelector(".achievement-banner");
     if (existing) existing.remove();
@@ -84,7 +102,15 @@ window.Celebrations = (function () {
     const banner = document.createElement("div");
     banner.className = "achievement-banner " + variant;
     banner.setAttribute("role", "status");
-    banner.textContent = message;
+    if (iconUrl) {
+      const icon = document.createElement("img");
+      icon.className = "banner-crest";
+      icon.src = iconUrl;
+      icon.alt = "";
+      icon.onerror = () => icon.remove();
+      banner.appendChild(icon);
+    }
+    banner.appendChild(document.createTextNode(message));
     document.body.appendChild(banner);
 
     // Trigger the fade-out shortly before removal.
@@ -107,6 +133,29 @@ window.Celebrations = (function () {
     }
 
     if (markedChamp) {
+      // Region completion: the marked champion just finished a whole
+      // Globetrotter region. Outranks the letter cheer.
+      if (typeof GLOBETROTTER_FILTERS !== "undefined") {
+        for (const [region, data] of Object.entries(GLOBETROTTER_FILTERS)) {
+          if (!data.champions.includes(markedChamp.id)) continue;
+          const regionChamps = champions.filter((c) =>
+            data.champions.includes(c.id),
+          );
+          if (
+            regionChamps.length &&
+            regionChamps.every((c) => progress[c.id])
+          ) {
+            fireRegion();
+            const crestUrl =
+              typeof regionCrestUrl === "function"
+                ? regionCrestUrl(region)
+                : null;
+            showBanner(`${region} complete — every champion played!`, "region", crestUrl);
+            return;
+          }
+        }
+      }
+
       const letter = letterOf(markedChamp.name);
       const group = champions.filter((c) => letterOf(c.name) === letter);
       if (group.length && group.every((c) => progress[c.id])) {

@@ -1036,6 +1036,21 @@ body.summoner-search-hidden .wip-notice {
     0 0 20px rgba(200, 155, 60, 0.4);
 }
 
+/* Globetrotter region completion — strong gold accent + crest */
+.achievement-banner.region {
+  border-color: #c89b3c;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.4),
+    0 0 26px rgba(200, 155, 60, 0.55);
+}
+
+.achievement-banner .banner-crest {
+  height: 26px;
+  width: auto;
+  vertical-align: -6px;
+  margin-right: 10px;
+}
+
 /* 100% celebration — rainbow accent */
 .achievement-banner.complete {
   border: 1px solid transparent;
