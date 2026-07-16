@@ -1,5 +1,5 @@
 // Auto-generated from curated challenge reference data
-// Last updated: 2026-07-08T19:52:30.958Z
+// Last updated: 2026-07-16T18:47:47.763Z
 // Run: npm run update-data
 
 const GLOBETROTTER_FILTERS = {
@@ -46,6 +46,7 @@ const GLOBETROTTER_FILTERS = {
       "Garen",
       "JarvanIV",
       "Kayle",
+      "Locke",
       "Lucian",
       "Lux",
       "Morgana",
@@ -102,6 +103,7 @@ const GLOBETROTTER_FILTERS = {
       "Xayah",
       "Yasuo",
       "Yone",
+      "Yunara",
       "Zed"
     ],
   },
@@ -121,6 +123,7 @@ const GLOBETROTTER_FILTERS = {
   "Noxus": {
     description: "Strength Above All",
     champions: [
+      "Ambessa",
       "Briar",
       "Cassiopeia",
       "Darius",
@@ -128,6 +131,7 @@ const GLOBETROTTER_FILTERS = {
       "Katarina",
       "Kled",
       "Leblanc",
+      "Mel",
       "Mordekaiser",
       "Rell",
       "Riven",
@@ -182,8 +186,7 @@ const GLOBETROTTER_FILTERS = {
       "Renekton",
       "Sivir",
       "Taliyah",
-      "Xerath",
-      "Zilean"
+      "Xerath"
     ],
   },
   "Targon": {
