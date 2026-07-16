@@ -743,6 +743,70 @@ body.summoner-search-hidden .wip-notice {
   margin-bottom: 12px;
 }
 
+.region-crest {
+  height: 20px;
+  width: 20px;
+  object-fit: contain;
+}
+
+/* Champion filter tooltip (hover / focus / long-press) */
+.champion-tooltip {
+  display: none;
+  position: fixed;
+  z-index: 100;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 240px;
+  padding: 10px 12px;
+  background: var(--card-bg, #151a23);
+  color: var(--fg, #e6e6e6);
+  border: 1px solid rgba(200, 155, 60, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 0.85em;
+  text-align: left;
+  pointer-events: none;
+}
+
+.champion-tooltip.visible {
+  display: flex;
+}
+
+.champion-tooltip .tooltip-champ {
+  font-weight: 700;
+  font-size: 1.05em;
+}
+
+.champion-tooltip .tooltip-section-title {
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #c89b3c;
+}
+
+.champion-tooltip .tooltip-region {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.champion-tooltip .tooltip-crest {
+  height: 18px;
+  width: 18px;
+  object-fit: contain;
+}
+
+.champion-tooltip .tooltip-harmony,
+.champion-tooltip .tooltip-empty {
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+.champion-tooltip .tooltip-empty {
+  font-style: italic;
+}
+
 .region-count {
   font-size: 0.9em;
   opacity: 0.7;
@@ -763,11 +827,19 @@ body.summoner-search-hidden .wip-notice {
   transition:
     transform 0.1s,
     opacity 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .champion:hover {
   transform: scale(1.05);
   background: var(--card-hover, #1a1f2b);
+}
+
+.champion:focus-visible {
+  outline: 2px solid #c89b3c;
+  outline-offset: 2px;
 }
 
 .champion img {

@@ -188,6 +188,147 @@ function getChampionFilters(champId, filterObject) {
   return filters;
 }
 
+// Official region crest icons served by Riot's Universe site.
+// "iona" and "mt_targon" are the actual asset names on their CDN.
+const REGION_CREST_SLUGS = {
+  "Bandle City": "bandle_city",
+  Bilgewater: "bilgewater",
+  Demacia: "demacia",
+  Freljord: "freljord",
+  Ionia: "iona",
+  Ixtal: "ixtal",
+  Noxus: "noxus",
+  Piltover: "piltover",
+  "Shadow Isles": "shadow_isles",
+  Shurima: "shurima",
+  Targon: "mt_targon",
+  Void: "void",
+  Zaun: "zaun",
+};
+
+function regionCrestUrl(regionName) {
+  const slug = REGION_CREST_SLUGS[regionName];
+  return slug
+    ? `https://universe.leagueoflegends.com/images/${slug}_crest_icon.png`
+    : null;
+}
+
+function createRegionCrest(regionName, className) {
+  const url = regionCrestUrl(regionName);
+  if (!url) return null;
+  const img = document.createElement("img");
+  img.className = className;
+  img.src = url;
+  img.alt = "";
+  img.onerror = () => img.remove();
+  return img;
+}
+
+// --- CHAMPION FILTER TOOLTIP ---
+// Shows which Globetrotter regions and Harmony filters a champion belongs to.
+// Desktop: mouseover or keyboard focus. Touch: long-press the card.
+const HOVER_CAPABLE = window.matchMedia("(hover: hover)").matches;
+const LONG_PRESS_MS = 450;
+
+function getChampionTooltip() {
+  let tip = document.getElementById("champion-tooltip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "champion-tooltip";
+    tip.className = "champion-tooltip";
+    document.body.appendChild(tip);
+    // A fixed-position tooltip would drift away from its card on scroll.
+    window.addEventListener("scroll", hideChampionTooltip, { passive: true });
+    // On touch, dismiss when tapping anywhere outside a champion card.
+    document.addEventListener(
+      "touchstart",
+      (e) => {
+        if (!e.target.closest(".champion")) hideChampionTooltip();
+      },
+      { passive: true },
+    );
+  }
+  return tip;
+}
+
+function buildChampionTooltipContent(tip, champ) {
+  tip.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "tooltip-champ";
+  title.textContent = champ.name;
+  tip.appendChild(title);
+
+  const regions = getChampionFilters(champ.id, GLOBETROTTER_FILTERS);
+  const harmony = getChampionFilters(champ.id, HARMONY_FILTERS);
+
+  if (regions.length) {
+    const heading = document.createElement("div");
+    heading.className = "tooltip-section-title";
+    heading.textContent = "Globetrotter";
+    tip.appendChild(heading);
+
+    regions.forEach((region) => {
+      const row = document.createElement("div");
+      row.className = "tooltip-region";
+      const crest = createRegionCrest(region, "tooltip-crest");
+      if (crest) row.appendChild(crest);
+      const label = document.createElement("span");
+      label.textContent = region;
+      row.appendChild(label);
+      tip.appendChild(row);
+    });
+  }
+
+  if (harmony.length) {
+    const heading = document.createElement("div");
+    heading.className = "tooltip-section-title";
+    heading.textContent = "Harmony";
+    tip.appendChild(heading);
+
+    const list = document.createElement("div");
+    list.className = "tooltip-harmony";
+    list.textContent = harmony.join(", ");
+    tip.appendChild(list);
+  }
+
+  if (!regions.length && !harmony.length) {
+    const empty = document.createElement("div");
+    empty.className = "tooltip-empty";
+    empty.textContent = "Not part of any challenge filter";
+    tip.appendChild(empty);
+  }
+}
+
+function showChampionTooltip(card, champ) {
+  const tip = getChampionTooltip();
+  buildChampionTooltipContent(tip, champ);
+  tip.classList.add("visible");
+
+  const rect = card.getBoundingClientRect();
+  const margin = 8;
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+
+  let left = rect.left + rect.width / 2 - width / 2;
+  left = Math.max(
+    margin,
+    Math.min(left, window.innerWidth - width - margin),
+  );
+
+  // Prefer above the card; fall back to below near the top of the viewport.
+  let top = rect.top - height - margin;
+  if (top < margin) top = rect.bottom + margin;
+
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function hideChampionTooltip() {
+  const tip = document.getElementById("champion-tooltip");
+  if (tip) tip.classList.remove("visible");
+}
+
 // --- ELEMENTS ---
 const DEFAULT_COLORS = [
   "#e57373",
@@ -603,6 +744,9 @@ function createChampionCard(champ) {
 
   const div = document.createElement("div");
   div.className = "champion";
+  div.tabIndex = 0;
+  div.setAttribute("role", "button");
+  div.setAttribute("aria-pressed", String(Boolean(progress[champ.id])));
   if (progress[champ.id]) div.classList.add("done");
 
   const img = document.createElement("img");
@@ -616,15 +760,54 @@ function createChampionCard(champ) {
   div.appendChild(img);
   div.appendChild(name);
 
+  // Long-press on touch devices shows the tooltip instead of toggling.
+  let longPressTimer = null;
+  let longPressFired = false;
+
   div.onclick = () => {
+    if (longPressFired) {
+      longPressFired = false;
+      return;
+    }
+    hideChampionTooltip();
     const nowDone = !progress[champ.id];
     progress[champ.id] = nowDone ? new Date().toISOString() : false;
     div.classList.toggle("done");
+    div.setAttribute("aria-pressed", String(nowDone));
     saveState();
     updateProgressText();
     renderHistory();
     if (nowDone) window.Celebrations?.check(champions, progress, champ);
   };
+
+  div.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      div.click();
+    }
+  });
+
+  if (HOVER_CAPABLE) {
+    div.addEventListener("mouseenter", () => showChampionTooltip(div, champ));
+    div.addEventListener("mouseleave", hideChampionTooltip);
+  }
+  div.addEventListener("focus", () => showChampionTooltip(div, champ));
+  div.addEventListener("blur", hideChampionTooltip);
+
+  div.addEventListener("touchstart", () => {
+    longPressFired = false;
+    longPressTimer = setTimeout(() => {
+      longPressFired = true;
+      showChampionTooltip(div, champ);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+  const cancelLongPress = () => clearTimeout(longPressTimer);
+  div.addEventListener("touchmove", cancelLongPress, { passive: true });
+  div.addEventListener("touchend", cancelLongPress, { passive: true });
+  div.addEventListener("touchcancel", cancelLongPress, { passive: true });
+  div.addEventListener("contextmenu", (e) => {
+    if (longPressFired) e.preventDefault();
+  });
 
   return div;
 }
@@ -699,6 +882,8 @@ function renderChampions() {
 
       const filterBadge = document.createElement("div");
       filterBadge.className = "filter-badge filter-badge-region";
+      const crest = createRegionCrest(selectedFilter, "region-crest");
+      if (crest) filterBadge.appendChild(crest);
       const filterLabel = document.createElement("span");
       filterLabel.className = "filter-badge-label";
       filterLabel.textContent = selectedFilter;
