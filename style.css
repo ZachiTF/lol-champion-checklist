@@ -305,29 +305,32 @@ body.animations-enabled .progress-bar {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* closed drawer must not block clicks on content beneath it */
   pointer-events: none;
 }
 
+.settings-drawer.open {
+  pointer-events: auto;
+}
+
 .settings-drawer > * {
-  opacity: 0;
-  transform: translateY(-10px) scale(0.85);
-  pointer-events: none;
   transition:
     opacity 0.25s ease,
     transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    visibility 0.25s,
     background 0.2s,
     border-color 0.2s,
     box-shadow 0.2s;
 }
 
-.settings-drawer.open > * {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
-
-.settings-drawer.open > .disabled {
-  opacity: 0.5;
+/* The ID keeps this rule above per-button state rules like
+   `.animation-toggle.disabled { opacity: 0.5 }`, which would otherwise
+   leave "off" toggles half-visible while the drawer is closed. */
+#theme-switcher .settings-drawer:not(.open) > * {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px) scale(0.85);
+  pointer-events: none;
 }
 
 .settings-drawer > :nth-child(2) {
@@ -711,11 +714,21 @@ body.summoner-search-hidden .wip-notice {
   border-color: #c89b3c;
 }
 
+/* No font-weight change here: a bolder label widens the button and
+   shifts its neighbors. */
 .filter-toggle.active {
   background: rgba(200, 155, 60, 0.2);
   border-color: #c89b3c;
   color: #c89b3c;
-  font-weight: 600;
+}
+
+.filter-toggle.sort-dir {
+  flex: 0 0 auto;
+  width: 38px;
+  padding: 8px 0;
+  text-align: center;
+  font-size: 1.05em;
+  line-height: 1;
 }
 
 .filter-reset {
@@ -752,6 +765,7 @@ body.summoner-search-hidden .wip-notice {
   .filter-bar input[type="text"],
   .filter-bar select,
   .filter-toggle,
+  .filter-toggle.sort-dir,
   .filter-reset {
     width: 100%;
     min-width: 0;

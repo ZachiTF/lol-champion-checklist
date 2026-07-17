@@ -91,9 +91,17 @@
       </select>
       <select id="filter-sort" title="Sort champions">
         <option value="name" selected>Sort: Name</option>
-        <option value="incomplete">Sort: Incomplete first</option>
-        <option value="recent">Sort: Recently done</option>
+        <option value="done">Sort: Completion</option>
+        <option value="recent">Sort: Done date</option>
       </select>
+      <button
+        id="filter-sort-dir"
+        class="filter-toggle sort-dir"
+        title="Toggle sort direction"
+        aria-label="Sort direction: ascending"
+      >
+        ↑
+      </button>
       <button
         id="filter-hide-done"
         class="filter-toggle"

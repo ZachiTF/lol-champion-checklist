@@ -183,8 +183,53 @@ let filterState = {
   globetrotter: [], // Multiple globetrotter filters (regions)
   harmony: [], // Multiple harmony filters (properties)
   hideCompleted: false,
-  sort: "name", // "name" | "incomplete" | "recent"
+  sortKey: "name", // "name" | "done" | "recent"
+  sortDir: "asc", // "asc" | "desc"
 };
+
+// Current display order (champion ids). Sorts are applied to this array
+// in place with a stable sort, so sorting by one key after another keeps
+// the previous order as the tie-breaker (multi-key sorting): e.g. sort by
+// Name ↓ then Completion ↑ gives incomplete-first, Z→A within each group.
+let championOrder = [];
+
+function applySort() {
+  const progress = getProgress();
+  const byId = new Map(champions.map((c) => [c.id, c]));
+  const dir = filterState.sortDir === "desc" ? -1 : 1;
+  const doneTime = (champ) => {
+    const value = progress[champ.id];
+    if (!value) return -1; // unmarked sorts before the oldest done date
+    const time = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isNaN(time) ? 0 : time;
+  };
+  championOrder.sort((aId, bId) => {
+    const a = byId.get(aId);
+    const b = byId.get(bId);
+    if (!a || !b) return 0;
+    let cmp = 0;
+    if (filterState.sortKey === "name") {
+      cmp = a.name.localeCompare(b.name);
+    } else if (filterState.sortKey === "done") {
+      // ascending: incomplete before done
+      cmp = (progress[a.id] ? 1 : 0) - (progress[b.id] ? 1 : 0);
+    } else if (filterState.sortKey === "recent") {
+      cmp = doneTime(a) - doneTime(b);
+    }
+    return cmp * dir;
+  });
+}
+
+function resetSortOrder() {
+  championOrder = champions.map((c) => c.id);
+}
+
+// Champions in the current display order (falls back to A–Z before load).
+function orderedChampions() {
+  if (!championOrder.length) return [...champions];
+  const byId = new Map(champions.map((c) => [c.id, c]));
+  return championOrder.map((id) => byId.get(id)).filter(Boolean);
+}
 
 // Fuzzy name matching for the search box. Case and punctuation are ignored
 // ("khazix" finds Kha'Zix, "miss fortune" finds MissFortune); when no
@@ -424,6 +469,18 @@ function getProgress() {
 const UNDO_DURATION = 8000;
 let undoBannerTimers = [];
 
+// The last undoable action stays available in the tab ⚙ menu after the
+// banner expires, until it is undone or replaced by a newer action.
+let lastUndoAction = null;
+
+function performUndo() {
+  if (!lastUndoAction) return;
+  const { undo } = lastUndoAction;
+  lastUndoAction = null;
+  dismissUndoBanner(true);
+  undo();
+}
+
 function dismissUndoBanner(immediate = false) {
   const banner = document.querySelector(".undo-banner");
   undoBannerTimers.forEach(clearTimeout);
@@ -439,6 +496,9 @@ function dismissUndoBanner(immediate = false) {
 
 function showUndoBanner(message, undoFn) {
   dismissUndoBanner(true);
+  lastUndoAction = { message, undo: undoFn };
+  // The tab menu was rebuilt before this call; refresh its Undo entry.
+  renderTabActions();
 
   const banner = document.createElement("div");
   banner.className = "undo-banner";
@@ -453,10 +513,7 @@ function showUndoBanner(message, undoFn) {
   btn.type = "button";
   btn.className = "undo-btn";
   btn.textContent = "Undo";
-  btn.onclick = () => {
-    dismissUndoBanner(true);
-    undoFn();
-  };
+  btn.onclick = performUndo;
   banner.appendChild(btn);
 
   document.body.appendChild(banner);
@@ -564,6 +621,17 @@ function renderTabActions() {
   headerLabel.textContent = page.name;
   header.appendChild(headerLabel);
   menu.appendChild(header);
+
+  // Undo section — mirrors the transient banner so the last destructive
+  // action stays revertible after the banner disappears.
+  if (lastUndoAction) {
+    const undoSection = document.createElement("div");
+    undoSection.className = "menu-section";
+    undoSection.appendChild(
+      createMenuItem("↶", `Undo: ${lastUndoAction.message}`, performUndo),
+    );
+    menu.appendChild(undoSection);
+  }
 
   // Section 1: Color / Rename / Delete
   const section1 = document.createElement("div");
@@ -969,38 +1037,16 @@ function renderChampions() {
     );
   }
 
-  // Applies the view options (hide completed, sort) to a list that has
-  // already been filtered. Progress counts are computed before this so
-  // hiding done champions doesn't skew them.
+  // Hides done champions after counts are computed so hiding doesn't skew
+  // them. Ordering itself comes from championOrder (see applySort).
   function applyViewOptions(champList) {
-    let list = champList;
-    if (filterState.hideCompleted) {
-      list = list.filter((champ) => !progress[champ.id]);
-    }
-    if (filterState.sort === "incomplete") {
-      list = [...list].sort(
-        (a, b) =>
-          (progress[a.id] ? 1 : 0) - (progress[b.id] ? 1 : 0) ||
-          a.name.localeCompare(b.name),
-      );
-    } else if (filterState.sort === "recent") {
-      // Most recently marked first; unmarked champions keep A–Z at the end.
-      const doneTime = (champ) => {
-        const value = progress[champ.id];
-        if (!value) return -1;
-        const time = typeof value === "string" ? Date.parse(value) : NaN;
-        return Number.isNaN(time) ? 0 : time;
-      };
-      list = [...list].sort(
-        (a, b) => doneTime(b) - doneTime(a) || a.name.localeCompare(b.name),
-      );
-    }
-    return list;
+    if (!filterState.hideCompleted) return champList;
+    return champList.filter((champ) => !progress[champ.id]);
   }
 
   // If no globetrotter filters selected, show all champions with harmony/search filters
   if (filterState.globetrotter.length === 0) {
-    let filteredChampions = [...champions];
+    let filteredChampions = orderedChampions();
     filteredChampions = filterBySearch(filteredChampions);
     filteredChampions = filterByHarmony(filteredChampions);
     filteredChampions = applyViewOptions(filteredChampions);
@@ -1027,7 +1073,7 @@ function renderChampions() {
     filterState.globetrotter.forEach((selectedFilter, index) => {
       // Get champions for this filter
       const filterData = GLOBETROTTER_FILTERS[selectedFilter];
-      let filterChampions = champions.filter((champ) =>
+      let filterChampions = orderedChampions().filter((champ) =>
         filterData.champions.includes(champ.id),
       );
       filterChampions = filterBySearch(filterChampions);
@@ -1468,11 +1514,20 @@ function populateFilterOptions() {
   });
 }
 
-// Keeps the sort dropdown and hide-completed button in sync with filterState.
+// Keeps the sort controls and hide-completed button in sync with filterState.
 function syncViewControls() {
   const sortSelect = document.getElementById("filter-sort");
+  const sortDirBtn = document.getElementById("filter-sort-dir");
   const hideDoneBtn = document.getElementById("filter-hide-done");
-  if (sortSelect) sortSelect.value = filterState.sort;
+  if (sortSelect) sortSelect.value = filterState.sortKey;
+  if (sortDirBtn) {
+    const ascending = filterState.sortDir === "asc";
+    sortDirBtn.textContent = ascending ? "↑" : "↓";
+    sortDirBtn.setAttribute(
+      "aria-label",
+      `Sort direction: ${ascending ? "ascending" : "descending"}`,
+    );
+  }
   if (hideDoneBtn) {
     hideDoneBtn.classList.toggle("active", filterState.hideCompleted);
     hideDoneBtn.setAttribute("aria-pressed", String(filterState.hideCompleted));
@@ -1486,6 +1541,7 @@ function syncViewControls() {
   const globetrotterSelect = document.getElementById("filter-region");
   const harmonySelect = document.getElementById("filter-properties");
   const sortSelect = document.getElementById("filter-sort");
+  const sortDirBtn = document.getElementById("filter-sort-dir");
   const hideDoneBtn = document.getElementById("filter-hide-done");
   const resetBtn = document.getElementById("filter-reset");
 
@@ -1529,8 +1585,18 @@ function syncViewControls() {
     harmonySelect.selectedIndex = 0;
   });
 
+  // Each sort action re-sorts the current order in place (stable), so
+  // earlier sorts survive as tie-breakers.
   sortSelect?.addEventListener("change", (e) => {
-    filterState.sort = e.target.value;
+    filterState.sortKey = e.target.value;
+    applySort();
+    renderChampions();
+  });
+
+  sortDirBtn?.addEventListener("click", () => {
+    filterState.sortDir = filterState.sortDir === "asc" ? "desc" : "asc";
+    syncViewControls();
+    applySort();
     renderChampions();
   });
 
@@ -1546,8 +1612,10 @@ function syncViewControls() {
       globetrotter: [],
       harmony: [],
       hideCompleted: false,
-      sort: "name",
+      sortKey: "name",
+      sortDir: "asc",
     };
+    resetSortOrder();
     searchInput.value = "";
     searchClearBtn.style.display = "none";
     syncViewControls();
@@ -1724,6 +1792,7 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
     champions = Object.values(championData.data).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
+    resetSortOrder();
 
     // Metadata (CHAMPION_REGIONS and CHAMPION_PROPERTIES) already available from loaded scripts
 
