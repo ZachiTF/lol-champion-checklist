@@ -107,11 +107,9 @@
 
     <script src="data/globetrotter-filters.js"></script>
     <script src="data/harmony-filters.js"></script>
-    <script
-      src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
-      integrity="sha384-sPwMflxqfAN+Q5mvlkLmHiX3PORGbZSXHiSGPTXT9VHCD/AB+b+r+vJWsqprv+7k"
-      crossorigin="anonymous"
-    ></script>
+    <!-- Vendored (ISC license): jsdelivr's on-the-fly minifier serves varying
+         bytes per edge node, which made SRI hashes fail intermittently. -->
+    <script src="vendor/canvas-confetti-1.9.3.js"></script>
     <script src="celebrations.js"></script>
     <script>
       window.APP_CONFIG = window.APP_CONFIG || {};

@@ -1,16 +1,18 @@
 // --- SERVER LIST ---
+// `value` is the platform routing host (challenges API), `cluster` the
+// regional routing host (account-v1 lives only on americas/asia/europe).
 const RIOT_SERVERS = [
-  { value: "euw1", label: "EUW" },
-  { value: "na1", label: "NA" },
-  { value: "br1", label: "BR" },
-  { value: "eune1", label: "EUNE" },
-  { value: "kr", label: "KR" },
-  { value: "jp1", label: "JP" },
-  { value: "ru", label: "RU" },
-  { value: "tr1", label: "TR" },
-  { value: "oc1", label: "OCE" },
-  { value: "la1", label: "LAN" },
-  { value: "la2", label: "LAS" },
+  { value: "euw1", label: "EUW", cluster: "europe" },
+  { value: "na1", label: "NA", cluster: "americas" },
+  { value: "br1", label: "BR", cluster: "americas" },
+  { value: "eun1", label: "EUNE", cluster: "europe" },
+  { value: "kr", label: "KR", cluster: "asia" },
+  { value: "jp1", label: "JP", cluster: "asia" },
+  { value: "ru", label: "RU", cluster: "europe" },
+  { value: "tr1", label: "TR", cluster: "europe" },
+  { value: "oc1", label: "OCE", cluster: "americas" },
+  { value: "la1", label: "LAN", cluster: "americas" },
+  { value: "la2", label: "LAS", cluster: "americas" },
 ];
 
 const RIOT_API_STORAGE_KEY = "lol_riot_api_key";
@@ -93,18 +95,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     status.textContent = "Fetching...";
     try {
-      // Step 1: Get Summoner ID
-      const summonerRes = await fetch(
-        `https://${server}.api.riotgames.com/lol/summoner/v4/summoners/by-name/${encodeURIComponent(
-          summoner,
-        )}?api_key=${encodeURIComponent(apiKey)}`,
+      // Riot IDs are "gameName#tagLine"; default the tag to the server label
+      // (matches the input placeholder, e.g. "name" on EUW → "name#EUW").
+      const serverInfo = RIOT_SERVERS.find((s) => s.value === server);
+      const [gameName, tagLine] = summoner.includes("#")
+        ? summoner.split("#").map((part) => part.trim())
+        : [summoner, serverInfo?.label || ""];
+      // Step 1: Riot ID → PUUID (summoner-v4 by-name was removed by Riot)
+      const accountRes = await fetch(
+        `https://${serverInfo?.cluster}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(
+          gameName,
+        )}/${encodeURIComponent(tagLine)}?api_key=${encodeURIComponent(apiKey)}`,
       );
-      if (!summonerRes.ok) throw new Error("Summoner not found.");
-      const summonerData = await summonerRes.json();
+      if (!accountRes.ok) throw new Error("Player not found.");
+      const accountData = await accountRes.json();
       // Step 2: Get Challenge Progress (Adapt to All Situations, challengeId=303001)
       const challengeRes = await fetch(
         `https://${server}.api.riotgames.com/lol/challenges/v1/player-data/${
-          summonerData.puuid
+          accountData.puuid
         }?api_key=${encodeURIComponent(apiKey)}`,
       );
       if (!challengeRes.ok) throw new Error("Challenge data not found.");
@@ -114,10 +122,9 @@ document.addEventListener("DOMContentLoaded", () => {
         (c) => c.challengeId === 303001,
       );
       if (!challenge) throw new Error("Challenge not found.");
-      status.textContent = `Progress: ${
-        challenge.percentile
-          ? Math.round(challenge.percentile * 100)
-          : challenge.value
+      // `value` is the champion count; `percentile` is a player ranking, not progress
+      status.textContent = `Progress: ${challenge.value}${
+        challenge.level ? ` (${challenge.level})` : ""
       }`;
       // TODO: Parse and update champion progress here
     } catch (e) {
@@ -402,7 +409,11 @@ function renderTabs() {
       tab.style.background = page.color;
       textColor = getContrastYIQ(page.color);
     }
-    tab.innerHTML = `<span class="tab-label" style="color:${textColor}">${page.name}</span>`;
+    const tabLabel = document.createElement("span");
+    tabLabel.className = "tab-label";
+    if (textColor) tabLabel.style.color = textColor;
+    tabLabel.textContent = page.name;
+    tab.appendChild(tabLabel);
     tab.onclick = () => {
       state.activePage = id;
       saveState();
@@ -1121,7 +1132,8 @@ function renderAll() {
   renderThemeSwitcher();
   renderTabs();
   renderTabActions();
-  initializeFilters();
+  populateFilterOptions();
+  renderActiveFilters();
   renderChampions();
   renderHistory();
 }
@@ -1171,15 +1183,11 @@ function createFilterBadge(value, type) {
   return badge;
 }
 
-function initializeFilters() {
-  const searchInput = document.getElementById("filter-search");
+// Repopulates dropdown options; safe to call on every render.
+function populateFilterOptions() {
   const globetrotterSelect = document.getElementById("filter-region");
   const harmonySelect = document.getElementById("filter-properties");
-  const resetBtn = document.getElementById("filter-reset");
-
-  const searchClearBtn = document.getElementById("filter-search-clear");
-  if (!searchInput || !globetrotterSelect || !harmonySelect || !searchClearBtn)
-    return;
+  if (!globetrotterSelect || !harmonySelect) return;
 
   // Populate globetrotter dropdown
   const globetrotterFilters = Object.keys(GLOBETROTTER_FILTERS).sort();
@@ -1202,8 +1210,19 @@ function initializeFilters() {
     opt.textContent = filterName;
     harmonySelect.appendChild(opt);
   });
+}
 
-  // Event listeners
+// Wires filter control listeners exactly once (re-running this on every
+// render used to stack duplicate listeners and re-render per keystroke).
+(function initFilterControls() {
+  const searchInput = document.getElementById("filter-search");
+  const globetrotterSelect = document.getElementById("filter-region");
+  const harmonySelect = document.getElementById("filter-properties");
+  const resetBtn = document.getElementById("filter-reset");
+
+  const searchClearBtn = document.getElementById("filter-search-clear");
+  if (!searchInput || !globetrotterSelect || !harmonySelect || !searchClearBtn)
+    return;
 
   searchInput.addEventListener("input", (e) => {
     filterState.search = e.target.value;
@@ -1244,14 +1263,11 @@ function initializeFilters() {
   resetBtn.addEventListener("click", () => {
     filterState = { search: "", globetrotter: [], harmony: [] };
     searchInput.value = "";
+    searchClearBtn.style.display = "none";
     renderActiveFilters();
     renderChampions();
   });
-
-  // Restore current filter values
-  searchInput.value = filterState.search;
-  renderActiveFilters();
-}
+})();
 
 // --- THEME SWITCHER ---
 const THEMES = ["dark", "light", "auto"];
