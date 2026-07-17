@@ -916,6 +916,48 @@ function shadeColor(color, percent) {
   return `#${rr}${gg}${bb}`;
 }
 
+// --- CHAMPION QUOTE PLAYBACK ---
+// Champion select/ban voice lines from Community Dragon's key-free CDN,
+// addressed by the numeric champion id (DDragon exposes it as `champ.key`).
+// Gated by the 🔊 toggle in the settings drawer; off by default so the site
+// never makes noise unprompted.
+const CDRAGON_VO_BASE =
+  "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1";
+let quoteAudio = null;
+
+function quotesEnabled() {
+  return localStorage.getItem("lol_quotes") === "true";
+}
+
+function playChampionQuote(champ) {
+  if (!quotesEnabled() || !champ?.key) return;
+
+  // Each champion has a "choose" (select) and a "ban" voice line; play a
+  // random one for variety and fall back to the other if it 404s.
+  const variants = ["champion-choose-vo", "champion-ban-vo"];
+  if (Math.random() < 0.5) variants.reverse();
+  const urls = variants.map((v) => `${CDRAGON_VO_BASE}/${v}/${champ.key}.ogg`);
+
+  // Interrupt a still-playing quote so quick marking doesn't overlap.
+  if (quoteAudio) {
+    quoteAudio.pause();
+    quoteAudio = null;
+  }
+
+  const audio = new Audio();
+  audio.volume = 0.6;
+  let attempt = 0;
+  const tryNext = () => {
+    if (attempt >= urls.length) return;
+    audio.src = urls[attempt++];
+    audio.play().catch(() => {}); // guards autoplay rejection; error hops on
+  };
+  // A failed source (404/decode) fires "error" → move to the fallback url.
+  audio.addEventListener("error", tryNext);
+  quoteAudio = audio;
+  tryNext();
+}
+
 function createChampionCard(champ) {
   const progress = getProgress();
 
@@ -957,6 +999,7 @@ function createChampionCard(champ) {
     renderHistory();
     // With "Hide completed" active the marked card has to leave the grid.
     if (nowDone && filterState.hideCompleted) renderChampions();
+    if (nowDone) playChampionQuote(champ);
     if (nowDone) window.Celebrations?.check(champions, progress, champ);
   };
 
@@ -1734,6 +1777,20 @@ function renderThemeSwitcher() {
     renderThemeSwitcher();
   };
   drawer.appendChild(summonerBtn);
+
+  // Champion quote toggle button
+  const quotesOn = localStorage.getItem("lol_quotes") === "true";
+  const quotesBtn = document.createElement("button");
+  quotesBtn.className = "quotes-toggle" + (quotesOn ? "" : " disabled");
+  quotesBtn.textContent = "🔊";
+  quotesBtn.title = `Champion quotes: ${
+    quotesOn ? "On" : "Off"
+  } (click to toggle)`;
+  quotesBtn.onclick = () => {
+    localStorage.setItem("lol_quotes", String(!quotesOn));
+    renderThemeSwitcher();
+  };
+  drawer.appendChild(quotesBtn);
 
   bar.appendChild(drawer);
 }

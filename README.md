@@ -24,6 +24,9 @@ Live site: https://zachitf.github.io/lol-champion-checklist/
   groups, and completion date on hover, keyboard focus, or long-press (touch)
 - Celebrates milestones with confetti (100%, finishing a region, finishing a
   starting letter)
+- Optional champion quotes: with the 🔊 toggle on, marking a champion plays
+  one of its select/ban voice lines (Community Dragon audio, no API key);
+  off by default
 - Exports/imports tab progress as JSON
 - Stores everything in browser local storage
 

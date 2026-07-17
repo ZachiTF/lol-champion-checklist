@@ -255,7 +255,8 @@ body.animations-enabled .progress-bar {
 .theme-toggle,
 .settings-toggle,
 .animation-toggle,
-.summoner-toggle {
+.summoner-toggle,
+.quotes-toggle {
   background: var(--card-bg, #151a23);
   border: 1px solid rgba(200, 155, 60, 0.3);
   border-radius: 8px;
@@ -273,7 +274,8 @@ body.animations-enabled .progress-bar {
 .theme-toggle:hover,
 .settings-toggle:hover,
 .animation-toggle:hover,
-.summoner-toggle:hover {
+.summoner-toggle:hover,
+.quotes-toggle:hover {
   background: var(--card-hover, #1f2633);
   border-color: rgba(200, 155, 60, 0.5);
   transform: translateY(-2px);
@@ -281,7 +283,8 @@ body.animations-enabled .progress-bar {
 }
 
 .animation-toggle.disabled,
-.summoner-toggle.disabled {
+.summoner-toggle.disabled,
+.quotes-toggle.disabled {
   opacity: 0.5;
 }
 
@@ -339,6 +342,10 @@ body.animations-enabled .progress-bar {
 
 .settings-drawer > :nth-child(3) {
   transition-delay: 0.12s;
+}
+
+.settings-drawer > :nth-child(4) {
+  transition-delay: 0.18s;
 }
 
 /* Keep the lift-on-hover inside the drawer without fighting the reveal */
