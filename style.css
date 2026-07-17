@@ -683,6 +683,12 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 500;
 }
 
+.filter-badge-count {
+  font-size: 0.85em;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
 .filter-badge-remove {
   display: flex;
   align-items: center;
@@ -810,6 +816,12 @@ body.summoner-search-hidden .wip-notice {
 .region-count {
   font-size: 0.9em;
   opacity: 0.7;
+}
+
+.region-count.complete {
+  color: #c89b3c;
+  opacity: 1;
+  font-weight: 600;
 }
 
 .champion-grid-region {

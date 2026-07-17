@@ -787,6 +787,7 @@ function createChampionCard(champ) {
     div.setAttribute("aria-pressed", String(nowDone));
     saveState();
     updateProgressText();
+    refreshFilterCounts();
     renderHistory();
     if (nowDone) window.Celebrations?.check(champions, progress, champ);
   };
@@ -821,6 +822,26 @@ function createChampionCard(champ) {
   });
 
   return div;
+}
+
+function setRegionCount(el, { done, total }) {
+  el.textContent = `${done}/${total} done`;
+  el.classList.toggle("complete", total > 0 && done === total);
+}
+
+// Refreshes every progress count shown in the UI (dropdown options,
+// harmony badges, region section headers) without re-rendering the grid.
+function refreshFilterCounts() {
+  populateFilterOptions();
+  renderActiveFilters();
+  document
+    .querySelectorAll(".region-section[data-champ-ids]")
+    .forEach((section) => {
+      const countEl = section.querySelector(".region-count");
+      if (!countEl) return;
+      const ids = section.dataset.champIds.split(",").filter(Boolean);
+      setRegionCount(countEl, filterProgressCounts(ids));
+    });
 }
 
 function renderChampions() {
@@ -883,9 +904,13 @@ function renderChampions() {
       filterChampions = filterBySearch(filterChampions);
       filterChampions = filterByHarmony(filterChampions);
 
-      // Create filter section
+      // Create filter section; remember the shown champion ids so the
+      // header count can be refreshed in place when a card is toggled.
       const filterSection = document.createElement("div");
       filterSection.className = "region-section";
+      filterSection.dataset.champIds = filterChampions
+        .map((c) => c.id)
+        .join(",");
 
       // Create filter header with badge
       const filterHeader = document.createElement("div");
@@ -912,10 +937,13 @@ function renderChampions() {
       filterBadge.appendChild(filterRemove);
       filterHeader.appendChild(filterBadge);
 
-      // Show count for this filter
+      // Show progress for this filter
       const filterCount = document.createElement("span");
       filterCount.className = "region-count";
-      filterCount.textContent = `${filterChampions.length} champions`;
+      setRegionCount(
+        filterCount,
+        filterProgressCounts(filterChampions.map((c) => c.id)),
+      );
       filterHeader.appendChild(filterCount);
 
       filterSection.appendChild(filterHeader);
@@ -1163,6 +1191,16 @@ function createFilterBadge(value, type) {
   label.className = "filter-badge-label";
   label.textContent = value;
 
+  let count = null;
+  const filterData =
+    type === "harmony" ? HARMONY_FILTERS[value] : GLOBETROTTER_FILTERS[value];
+  if (filterData) {
+    count = document.createElement("span");
+    count.className = "filter-badge-count";
+    const progress = filterProgressCounts(filterData.champions);
+    count.textContent = `${progress.done}/${progress.total}`;
+  }
+
   const remove = document.createElement("span");
   remove.className = "filter-badge-remove";
   remove.textContent = "×";
@@ -1179,11 +1217,32 @@ function createFilterBadge(value, type) {
   };
 
   badge.appendChild(label);
+  if (count) badge.appendChild(count);
   badge.appendChild(remove);
   return badge;
 }
 
-// Repopulates dropdown options; safe to call on every render.
+// Progress on the active page for the champions in a filter's list,
+// counted against the current roster (filter lists may lag a patch).
+function filterProgressCounts(champIds) {
+  const progress = state.pages[state.activePage]?.progress || {};
+  let done = 0;
+  let total = 0;
+  for (const champ of champions) {
+    if (!champIds.includes(champ.id)) continue;
+    total++;
+    if (progress[champ.id]) done++;
+  }
+  return { done, total };
+}
+
+function filterOptionLabel(filterName, filterData) {
+  const { done, total } = filterProgressCounts(filterData.champions);
+  return total ? `${filterName} (${done}/${total})` : filterName;
+}
+
+// Repopulates dropdown options (with progress counts); safe to call on
+// every render.
 function populateFilterOptions() {
   const globetrotterSelect = document.getElementById("filter-region");
   const harmonySelect = document.getElementById("filter-properties");
@@ -1196,7 +1255,10 @@ function populateFilterOptions() {
   globetrotterFilters.forEach((filterName) => {
     const opt = document.createElement("option");
     opt.value = filterName;
-    opt.textContent = filterName;
+    opt.textContent = filterOptionLabel(
+      filterName,
+      GLOBETROTTER_FILTERS[filterName],
+    );
     globetrotterSelect.appendChild(opt);
   });
 
@@ -1207,7 +1269,7 @@ function populateFilterOptions() {
   harmonyFilters.forEach((filterName) => {
     const opt = document.createElement("option");
     opt.value = filterName;
-    opt.textContent = filterName;
+    opt.textContent = filterOptionLabel(filterName, HARMONY_FILTERS[filterName]);
     harmonySelect.appendChild(opt);
   });
 }
