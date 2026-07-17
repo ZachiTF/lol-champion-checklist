@@ -8,9 +8,11 @@ Live site: https://zachitf.github.io/lol-champion-checklist/
 
 - Tracks champion completion per tab/page
 - Supports multiple pages (for different goals/accounts)
-- Filters by Globetrotter and Harmony groups
-- Shows each champion's Globetrotter region (with official crest) and Harmony
-  groups on hover, keyboard focus, or long-press (touch)
+- Filters by Globetrotter and Harmony groups, with done/total progress
+  counts per filter (dropdowns, badges, and region section headers)
+- Hide-completed toggle and sorting (name, incomplete first, recently done)
+- Shows each champion's Globetrotter region (with official crest), Harmony
+  groups, and completion date on hover, keyboard focus, or long-press (touch)
 - Celebrates milestones with confetti (100%, finishing a region, finishing a
   starting letter)
 - Exports/imports tab progress as JSON
@@ -98,6 +100,8 @@ to the committed snapshot. See `data/README.md` for details.
 - `style.css` — styling
 - `data/` — generated filter files
 - `scripts/` — data generation scripts
+- `vendor/` — vendored third-party libraries (canvas-confetti; the jsdelivr
+  auto-minified build serves varying bytes per edge node, breaking SRI)
 
 ## Related tools
 
