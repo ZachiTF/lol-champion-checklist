@@ -119,6 +119,7 @@
   --card-bg: #fff;
   --card-hover: #f5f5f5;
   --chart-gold: #a8842f;
+  --chart-line: #3f7cbf;
   --muted-fg: rgba(24, 24, 24, 0.6);
   --hairline: rgba(24, 24, 24, 0.15);
 }
@@ -132,6 +133,7 @@
   --card-bg: #151a23;
   --card-hover: #1f2633;
   --chart-gold: #b18a2a;
+  --chart-line: #64b5f6;
   --muted-fg: rgba(230, 230, 230, 0.55);
   --hairline: rgba(230, 230, 230, 0.14);
 }
@@ -251,6 +253,7 @@ body.animations-enabled .progress-bar {
 }
 
 .theme-toggle,
+.settings-toggle,
 .animation-toggle,
 .summoner-toggle {
   background: var(--card-bg, #151a23);
@@ -268,6 +271,7 @@ body.animations-enabled .progress-bar {
 }
 
 .theme-toggle:hover,
+.settings-toggle:hover,
 .animation-toggle:hover,
 .summoner-toggle:hover {
   background: var(--card-hover, #1f2633);
@@ -279,6 +283,72 @@ body.animations-enabled .progress-bar {
 .animation-toggle.disabled,
 .summoner-toggle.disabled {
   opacity: 0.5;
+}
+
+/* Settings drawer: the ⚙ button reveals the secondary toggles below it */
+.settings-toggle {
+  color: inherit;
+  transition:
+    all 0.2s,
+    transform 0.3s ease;
+}
+
+.settings-toggle.open {
+  border-color: rgba(200, 155, 60, 0.6);
+  transform: rotate(90deg);
+}
+
+.settings-drawer {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.settings-drawer > * {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.85);
+  pointer-events: none;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    background 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.settings-drawer.open > * {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.settings-drawer.open > .disabled {
+  opacity: 0.5;
+}
+
+.settings-drawer > :nth-child(2) {
+  transition-delay: 0.06s;
+}
+
+.settings-drawer > :nth-child(3) {
+  transition-delay: 0.12s;
+}
+
+/* Keep the lift-on-hover inside the drawer without fighting the reveal */
+.settings-drawer.open > :hover {
+  transform: translateY(-2px);
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-toggle,
+  .settings-drawer > * {
+    transition: none;
+  }
 }
 
 body.summoner-search-hidden .challenge-import,
@@ -936,11 +1006,90 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .history-chart {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 2px;
   height: 96px;
+  /* right gutter holds the cumulative-axis labels */
+  padding-right: 36px;
   border-bottom: 1px solid var(--hairline, rgba(230, 230, 230, 0.14));
+}
+
+/* Gridlines + right-hand labels for the cumulative axis */
+.history-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.history-gridline {
+  position: absolute;
+  left: 0;
+  right: 36px;
+  height: 1px;
+  background: var(--hairline, rgba(230, 230, 230, 0.14));
+}
+
+.history-gridline span {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.55));
+}
+
+/* Cumulative "climb" line, same scale as the gridlines */
+.history-cumulative {
+  position: absolute;
+  inset: 0 36px 0 0;
+  width: calc(100% - 36px);
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.history-cumulative polyline {
+  fill: none;
+  stroke: var(--chart-line, #64b5f6);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.history-legend {
+  display: inline-flex;
+  gap: 12px;
+  margin-left: 10px;
+}
+
+.history-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.history-legend .legend-item::before {
+  content: "";
+  display: inline-block;
+}
+
+.history-legend .legend-bar::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--chart-gold, #b18a2a);
+}
+
+.history-legend .legend-line::before {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--chart-line, #64b5f6);
 }
 
 .history-slot {
@@ -982,6 +1131,8 @@ body.summoner-search-hidden .wip-notice {
   display: flex;
   justify-content: space-between;
   margin-top: 4px;
+  /* align the end date with the plot area, not the axis-label gutter */
+  padding-right: 36px;
   font-size: 0.75em;
   color: var(--muted-fg, rgba(230, 230, 230, 0.55));
 }
@@ -1012,6 +1163,11 @@ body.summoner-search-hidden .wip-notice {
 
 .history-tooltip strong {
   font-size: 1.05em;
+}
+
+.history-tooltip .tooltip-total {
+  color: var(--chart-line, #64b5f6);
+  font-size: 0.95em;
 }
 
 .history-tooltip .tooltip-names {
@@ -1137,11 +1293,91 @@ body.summoner-search-hidden .wip-notice {
   }
 }
 
+/* Undo banner (shown after destructive tab actions instead of confirm()) */
+.undo-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--card-bg, #151a23);
+  color: var(--fg, #e6e6e6);
+  font-size: 14px;
+  border: 1px solid rgba(200, 155, 60, 0.4);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  animation: undo-in 0.3s ease;
+}
+
+.undo-banner .undo-btn {
+  border: 1px solid #c89b3c;
+  background: rgba(200, 155, 60, 0.15);
+  color: #c89b3c;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.undo-banner .undo-btn:hover {
+  background: rgba(200, 155, 60, 0.3);
+}
+
+.undo-banner.leaving {
+  animation: undo-out 0.4s ease forwards;
+}
+
+@keyframes undo-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes undo-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@media (max-width: 600px) {
+  .undo-banner {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+    justify-content: space-between;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .achievement-banner {
     animation: none;
   }
   .achievement-banner.leaving {
+    animation: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+  .undo-banner {
+    animation: none;
+  }
+  .undo-banner.leaving {
     animation: none;
     opacity: 0;
     transition: opacity 0.4s ease;

@@ -11,6 +11,12 @@ Live site: https://zachitf.github.io/lol-champion-checklist/
 - Filters by Globetrotter and Harmony groups, with done/total progress
   counts per filter (dropdowns, badges, and region section headers)
 - Hide-completed toggle and sorting (name, incomplete first, recently done)
+- Fuzzy champion search — punctuation-insensitive ("khazix" finds Kha'Zix)
+  with subsequence fallback ("mfort" finds Miss Fortune)
+- Progress history chart with per-day bars, a cumulative total line, and
+  gridlines
+- Undo banner for destructive actions (reset progress, delete tab, select
+  all) instead of confirm dialogs
 - Shows each champion's Globetrotter region (with official crest), Harmony
   groups, and completion date on hover, keyboard focus, or long-press (touch)
 - Celebrates milestones with confetti (100%, finishing a region, finishing a

@@ -186,6 +186,27 @@ let filterState = {
   sort: "name", // "name" | "incomplete" | "recent"
 };
 
+// Fuzzy name matching for the search box. Case and punctuation are ignored
+// ("khazix" finds Kha'Zix, "miss fortune" finds MissFortune); when no
+// substring matches, the query may also appear as a subsequence of the name
+// ("mfort" finds Miss Fortune).
+function normalizeSearchText(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function fuzzyMatchesName(query, name) {
+  const q = normalizeSearchText(query);
+  if (!q) return true;
+  const n = normalizeSearchText(name);
+  if (n.includes(q)) return true;
+  let matched = 0;
+  for (const ch of n) {
+    if (ch === q[matched]) matched++;
+    if (matched === q.length) return true;
+  }
+  return false;
+}
+
 // Get which filters a champion belongs to
 function getChampionFilters(champId, filterObject) {
   const filters = [];
@@ -393,7 +414,55 @@ function createPage(name) {
 }
 
 function getProgress() {
-  return state.pages[state.activePage].progress;
+  const page = state.pages[state.activePage];
+  return page ? page.progress : {};
+}
+
+// --- UNDO BANNER ---
+// Destructive tab actions run immediately instead of asking confirm();
+// the banner offers a few seconds to revert them.
+const UNDO_DURATION = 8000;
+let undoBannerTimers = [];
+
+function dismissUndoBanner(immediate = false) {
+  const banner = document.querySelector(".undo-banner");
+  undoBannerTimers.forEach(clearTimeout);
+  undoBannerTimers = [];
+  if (!banner) return;
+  if (immediate) {
+    banner.remove();
+  } else {
+    banner.classList.add("leaving");
+    window.setTimeout(() => banner.remove(), 400);
+  }
+}
+
+function showUndoBanner(message, undoFn) {
+  dismissUndoBanner(true);
+
+  const banner = document.createElement("div");
+  banner.className = "undo-banner";
+  banner.setAttribute("role", "status");
+
+  const text = document.createElement("span");
+  text.className = "undo-message";
+  text.textContent = message;
+  banner.appendChild(text);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "undo-btn";
+  btn.textContent = "Undo";
+  btn.onclick = () => {
+    dismissUndoBanner(true);
+    undoFn();
+  };
+  banner.appendChild(btn);
+
+  document.body.appendChild(banner);
+  undoBannerTimers.push(
+    window.setTimeout(() => dismissUndoBanner(), UNDO_DURATION),
+  );
 }
 
 // --- UI ---
@@ -538,13 +607,19 @@ function renderTabActions() {
       "🗑",
       "Delete tab",
       () => {
-        if (confirm("Delete this tab? This cannot be undone.")) {
-          delete state.pages[state.activePage];
-          const ids = Object.keys(state.pages);
-          state.activePage = ids.length ? ids[0] : null;
+        const deletedId = state.activePage;
+        const deletedPage = state.pages[deletedId];
+        delete state.pages[deletedId];
+        const ids = Object.keys(state.pages);
+        state.activePage = ids.length ? ids[0] : null;
+        saveState();
+        renderAll();
+        showUndoBanner(`Deleted tab "${deletedPage.name}"`, () => {
+          state.pages[deletedId] = deletedPage;
+          state.activePage = deletedId;
           saveState();
           renderAll();
-        }
+        });
       },
       { danger: true },
     ),
@@ -557,26 +632,34 @@ function renderTabActions() {
 
   section2.appendChild(
     createMenuItem("↺", "Reset progress", () => {
-      if (confirm("Reset progress for this tab?")) {
-        page.progress = {};
+      const previousProgress = page.progress;
+      page.progress = {};
+      saveState();
+      renderAll();
+      showUndoBanner(`Progress reset for "${page.name}"`, () => {
+        page.progress = previousProgress;
         saveState();
         renderAll();
-      }
+      });
     }),
   );
 
   section2.appendChild(
     createMenuItem("✓", "Select all", () => {
-      if (confirm("Mark all champions as done for this tab?")) {
-        const now = new Date().toISOString();
-        for (const champ of champions) {
-          // Keep the original timestamp of champions already marked
-          if (!page.progress[champ.id]) page.progress[champ.id] = now;
-        }
+      const previousProgress = { ...page.progress };
+      const now = new Date().toISOString();
+      for (const champ of champions) {
+        // Keep the original timestamp of champions already marked
+        if (!page.progress[champ.id]) page.progress[champ.id] = now;
+      }
+      saveState();
+      renderAll();
+      showUndoBanner(`Marked all champions on "${page.name}"`, () => {
+        page.progress = previousProgress;
         saveState();
         renderAll();
-        window.Celebrations?.check(champions, page.progress, null);
-      }
+      });
+      window.Celebrations?.check(champions, page.progress, null);
     }),
   );
   menu.appendChild(section2);
@@ -881,9 +964,8 @@ function renderChampions() {
   function filterBySearch(champList) {
     if (!filterState.search) return champList;
 
-    const searchLower = filterState.search.toLowerCase();
     return champList.filter((champ) =>
-      champ.name.toLowerCase().includes(searchLower),
+      fuzzyMatchesName(filterState.search, champ.name),
     );
   }
 
@@ -1030,6 +1112,16 @@ function formatDay(ms, withYear = false) {
   return new Date(ms).toLocaleDateString(undefined, opts);
 }
 
+// Whole-number gridline step (1/2/5 × 10ⁿ) aiming for ~4 lines up to `max`.
+function historyAxisStep(max) {
+  const target = Math.max(1, max / 4);
+  const pow = Math.pow(10, Math.floor(Math.log10(target)));
+  for (const m of [1, 2, 5, 10]) {
+    if (m * pow >= target) return m * pow;
+  }
+  return 10 * pow;
+}
+
 function getHistoryTooltip() {
   let tip = document.getElementById("history-tooltip");
   if (!tip) {
@@ -1106,15 +1198,66 @@ function renderHistory() {
   }
   const maxCount = Math.max(...buckets.map((b) => b.names.length));
 
+  // Running total per bucket — drives the cumulative line, the gridline
+  // axis, and the "total" figure in the bar tooltips.
+  let running = 0;
+  const cumulative = buckets.map((b) => (running += b.names.length));
+  const axisStep = historyAxisStep(entries.length);
+  const axisMax = Math.ceil(entries.length / axisStep) * axisStep;
+
   summary.textContent = `${entries.length} marked since ${formatDay(
     firstDay,
     true,
-  )} · per ${bucketLabel}`;
+  )}`;
+  const legend = document.createElement("span");
+  legend.className = "history-legend";
+  const legendBar = document.createElement("span");
+  legendBar.className = "legend-item legend-bar";
+  legendBar.textContent = `per ${bucketLabel}`;
+  const legendLine = document.createElement("span");
+  legendLine.className = "legend-item legend-line";
+  legendLine.textContent = "total";
+  legend.appendChild(legendBar);
+  legend.appendChild(legendLine);
+  summary.appendChild(legend);
+
+  // Gridlines (scaled to the cumulative axis, labeled on the right)
+  const gridOverlay = document.createElement("div");
+  gridOverlay.className = "history-grid";
+  for (let value = axisStep; value <= axisMax; value += axisStep) {
+    const line = document.createElement("div");
+    line.className = "history-gridline";
+    line.style.bottom = `${(value / axisMax) * 100}%`;
+    const label = document.createElement("span");
+    label.textContent = value;
+    line.appendChild(label);
+    gridOverlay.appendChild(line);
+  }
+  chart.appendChild(gridOverlay);
+
+  // Cumulative line overlay (same axis as the gridlines)
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("class", "history-cumulative");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const polyline = document.createElementNS(svgNS, "polyline");
+  const points = ["0,100"];
+  cumulative.forEach((total, i) => {
+    const x = ((i + 0.5) / bucketCount) * 100;
+    const y = 100 - (total / axisMax) * 100;
+    points.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  });
+  polyline.setAttribute("points", points.join(" "));
+  polyline.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(polyline);
+  chart.appendChild(svg);
 
   // Bars
   const tip = getHistoryTooltip();
   const hideTip = () => tip.classList.remove("visible");
-  buckets.forEach((bucket) => {
+  buckets.forEach((bucket, bucketIndex) => {
     const slot = document.createElement("div");
     slot.className = "history-slot";
     const count = bucket.names.length;
@@ -1147,6 +1290,10 @@ function renderHistory() {
         const when = document.createElement("span");
         when.textContent = dateText;
         tip.appendChild(when);
+        const totalEl = document.createElement("span");
+        totalEl.className = "tooltip-total";
+        totalEl.textContent = `${cumulative[bucketIndex]} total by then`;
+        tip.appendChild(totalEl);
         const shown = bucket.names.slice(0, 6);
         const namesEl = document.createElement("span");
         namesEl.className = "tooltip-names";
@@ -1426,6 +1573,19 @@ function setTheme(theme) {
   localStorage.setItem("lol_theme", theme);
 }
 
+// The secondary toggles (✨ effects, 🔍 summoner search) live in a drawer
+// behind the ⚙ settings button; only the theme toggle stays standalone.
+let settingsOpen = false;
+
+function applySettingsDrawerState() {
+  const gear = document.querySelector("#theme-switcher .settings-toggle");
+  const drawer = document.querySelector("#theme-switcher .settings-drawer");
+  if (!gear || !drawer) return;
+  gear.classList.toggle("open", settingsOpen);
+  gear.setAttribute("aria-expanded", String(settingsOpen));
+  drawer.classList.toggle("open", settingsOpen);
+}
+
 function renderThemeSwitcher() {
   const bar = document.getElementById("theme-switcher");
   if (!bar) return;
@@ -1454,6 +1614,25 @@ function renderThemeSwitcher() {
   };
   bar.appendChild(themeBtn);
 
+  // Settings button — expands the drawer with the remaining toggles.
+  // Toggling classes (instead of re-rendering) lets the CSS transition play;
+  // re-renders recreate the drawer already in its final state, so the
+  // animation doesn't replay when a toggle inside is clicked.
+  const settingsBtn = document.createElement("button");
+  settingsBtn.className = "settings-toggle" + (settingsOpen ? " open" : "");
+  settingsBtn.textContent = "⚙";
+  settingsBtn.title = "Settings";
+  settingsBtn.setAttribute("aria-haspopup", "true");
+  settingsBtn.setAttribute("aria-expanded", String(settingsOpen));
+  settingsBtn.onclick = () => {
+    settingsOpen = !settingsOpen;
+    applySettingsDrawerState();
+  };
+  bar.appendChild(settingsBtn);
+
+  const drawer = document.createElement("div");
+  drawer.className = "settings-drawer" + (settingsOpen ? " open" : "");
+
   // Animation toggle button
   const animationsEnabled = localStorage.getItem("lol_animations") !== "false";
   const animBtn = document.createElement("button");
@@ -1469,7 +1648,7 @@ function renderThemeSwitcher() {
     document.body.classList.toggle("animations-enabled", newState);
     renderThemeSwitcher();
   };
-  bar.appendChild(animBtn);
+  drawer.appendChild(animBtn);
 
   // Summoner search toggle button
   const summonerVisible = localStorage.getItem("lol_summoner_search") === "true";
@@ -1486,8 +1665,26 @@ function renderThemeSwitcher() {
     document.body.classList.toggle("summoner-search-hidden", !newState);
     renderThemeSwitcher();
   };
-  bar.appendChild(summonerBtn);
+  drawer.appendChild(summonerBtn);
+
+  bar.appendChild(drawer);
 }
+
+// Close the settings drawer on outside click or Escape.
+(function initSettingsDrawer() {
+  document.addEventListener("mousedown", (e) => {
+    if (!settingsOpen) return;
+    if (e.target.closest("#theme-switcher")) return;
+    settingsOpen = false;
+    applySettingsDrawerState();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && settingsOpen) {
+      settingsOpen = false;
+      applySettingsDrawerState();
+    }
+  });
+})();
 
 // --- MAIN ---
 // Initialize theme on load
