@@ -182,6 +182,8 @@ let filterState = {
   search: "",
   globetrotter: [], // Multiple globetrotter filters (regions)
   harmony: [], // Multiple harmony filters (properties)
+  hideCompleted: false,
+  sort: "name", // "name" | "incomplete" | "recent"
 };
 
 // Get which filters a champion belongs to
@@ -789,6 +791,8 @@ function createChampionCard(champ) {
     updateProgressText();
     refreshFilterCounts();
     renderHistory();
+    // With "Hide completed" active the marked card has to leave the grid.
+    if (nowDone && filterState.hideCompleted) renderChampions();
     if (nowDone) window.Celebrations?.check(champions, progress, champ);
   };
 
@@ -870,11 +874,41 @@ function renderChampions() {
     );
   }
 
+  // Applies the view options (hide completed, sort) to a list that has
+  // already been filtered. Progress counts are computed before this so
+  // hiding done champions doesn't skew them.
+  function applyViewOptions(champList) {
+    let list = champList;
+    if (filterState.hideCompleted) {
+      list = list.filter((champ) => !progress[champ.id]);
+    }
+    if (filterState.sort === "incomplete") {
+      list = [...list].sort(
+        (a, b) =>
+          (progress[a.id] ? 1 : 0) - (progress[b.id] ? 1 : 0) ||
+          a.name.localeCompare(b.name),
+      );
+    } else if (filterState.sort === "recent") {
+      // Most recently marked first; unmarked champions keep A–Z at the end.
+      const doneTime = (champ) => {
+        const value = progress[champ.id];
+        if (!value) return -1;
+        const time = typeof value === "string" ? Date.parse(value) : NaN;
+        return Number.isNaN(time) ? 0 : time;
+      };
+      list = [...list].sort(
+        (a, b) => doneTime(b) - doneTime(a) || a.name.localeCompare(b.name),
+      );
+    }
+    return list;
+  }
+
   // If no globetrotter filters selected, show all champions with harmony/search filters
   if (filterState.globetrotter.length === 0) {
     let filteredChampions = [...champions];
     filteredChampions = filterBySearch(filteredChampions);
     filteredChampions = filterByHarmony(filteredChampions);
+    filteredChampions = applyViewOptions(filteredChampions);
 
     // Show count
     const filterCount = document.createElement("div");
@@ -952,7 +986,7 @@ function renderChampions() {
       const filterGrid = document.createElement("div");
       filterGrid.className = "champion-grid-region";
 
-      filterChampions.forEach((champ) => {
+      applyViewOptions(filterChampions).forEach((champ) => {
         if (!(champ.id in progress)) {
           progress[champ.id] = false;
         }
@@ -1274,12 +1308,25 @@ function populateFilterOptions() {
   });
 }
 
+// Keeps the sort dropdown and hide-completed button in sync with filterState.
+function syncViewControls() {
+  const sortSelect = document.getElementById("filter-sort");
+  const hideDoneBtn = document.getElementById("filter-hide-done");
+  if (sortSelect) sortSelect.value = filterState.sort;
+  if (hideDoneBtn) {
+    hideDoneBtn.classList.toggle("active", filterState.hideCompleted);
+    hideDoneBtn.setAttribute("aria-pressed", String(filterState.hideCompleted));
+  }
+}
+
 // Wires filter control listeners exactly once (re-running this on every
 // render used to stack duplicate listeners and re-render per keystroke).
 (function initFilterControls() {
   const searchInput = document.getElementById("filter-search");
   const globetrotterSelect = document.getElementById("filter-region");
   const harmonySelect = document.getElementById("filter-properties");
+  const sortSelect = document.getElementById("filter-sort");
+  const hideDoneBtn = document.getElementById("filter-hide-done");
   const resetBtn = document.getElementById("filter-reset");
 
   const searchClearBtn = document.getElementById("filter-search-clear");
@@ -1322,10 +1369,28 @@ function populateFilterOptions() {
     harmonySelect.selectedIndex = 0;
   });
 
+  sortSelect?.addEventListener("change", (e) => {
+    filterState.sort = e.target.value;
+    renderChampions();
+  });
+
+  hideDoneBtn?.addEventListener("click", () => {
+    filterState.hideCompleted = !filterState.hideCompleted;
+    syncViewControls();
+    renderChampions();
+  });
+
   resetBtn.addEventListener("click", () => {
-    filterState = { search: "", globetrotter: [], harmony: [] };
+    filterState = {
+      search: "",
+      globetrotter: [],
+      harmony: [],
+      hideCompleted: false,
+      sort: "name",
+    };
     searchInput.value = "";
     searchClearBtn.style.display = "none";
+    syncViewControls();
     renderActiveFilters();
     renderChampions();
   });

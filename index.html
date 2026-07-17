@@ -89,6 +89,19 @@
       <select id="filter-properties">
         <option value="" disabled selected>Add Harmony Filter</option>
       </select>
+      <select id="filter-sort" title="Sort champions">
+        <option value="name" selected>Sort: Name</option>
+        <option value="incomplete">Sort: Incomplete first</option>
+        <option value="recent">Sort: Recently done</option>
+      </select>
+      <button
+        id="filter-hide-done"
+        class="filter-toggle"
+        aria-pressed="false"
+        title="Hide champions you already marked as done"
+      >
+        Hide completed
+      </button>
       <button id="filter-reset" class="filter-reset">Clear All</button>
     </div>
     <div id="active-filters" class="active-filters"></div>
