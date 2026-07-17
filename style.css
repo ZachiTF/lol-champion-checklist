@@ -807,6 +807,11 @@ body.summoner-search-hidden .wip-notice {
   font-size: 1.05em;
 }
 
+.champion-tooltip .tooltip-done {
+  color: #81c784;
+  font-weight: 600;
+}
+
 .champion-tooltip .tooltip-section-title {
   margin-top: 4px;
   font-size: 10px;

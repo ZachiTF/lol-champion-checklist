@@ -268,6 +268,19 @@ function buildChampionTooltipContent(tip, champ) {
   title.textContent = champ.name;
   tip.appendChild(title);
 
+  // Completion date (progress stores an ISO timestamp when marked done)
+  const doneValue = state.pages[state.activePage]?.progress?.[champ.id];
+  if (doneValue) {
+    const done = document.createElement("div");
+    done.className = "tooltip-done";
+    const time =
+      typeof doneValue === "string" ? new Date(doneValue).getTime() : NaN;
+    done.textContent = Number.isNaN(time)
+      ? "✓ Done"
+      : `✓ Done ${formatDay(time, true)}`;
+    tip.appendChild(done);
+  }
+
   const regions = getChampionFilters(champ.id, GLOBETROTTER_FILTERS);
   const harmony = getChampionFilters(champ.id, HARMONY_FILTERS);
 
