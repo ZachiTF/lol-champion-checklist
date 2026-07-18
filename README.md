@@ -120,6 +120,21 @@ to the committed snapshot. See `data/README.md` for details.
 - `vendor/` — vendored third-party libraries (canvas-confetti; the jsdelivr
   auto-minified build serves varying bytes per edge node, breaking SRI)
 
+## Development
+
+The app itself needs no build step. For contributing, one-time per clone:
+
+```bash
+npm install            # dev tools: pngjs (tests) + prettier (formatting)
+npm run hooks:install  # activate the pre-commit hook (sets core.hooksPath)
+```
+
+The pre-commit hook runs `npm run format:check` and `npm test`, blocking the
+commit if either fails. Run them directly any time; `npm run format` rewrites
+files to the Prettier style. (Users of the Python
+[pre-commit](https://pre-commit.com) framework can `pre-commit install`
+instead — `.pre-commit-config.yaml` enforces the same two checks.)
+
 ## Related tools
 
 - https://github.com/AlexDerr/ChallengeComps
