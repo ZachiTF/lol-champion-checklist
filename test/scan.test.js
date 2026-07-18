@@ -215,3 +215,25 @@ test("detects champions when the client is scaled up (higher-res capture)", () =
   assert.deepEqual(r.benchIds, EXPECTED);
   assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
 });
+
+// ---- a second, independent ARAM screenshot (different champs, 6-slot bench) ----
+// Guards against overfitting the geometry/thresholds to the first screenshot.
+const png2 = PNG.sync.read(fs.readFileSync(path.join(FIX, "aram-bench-2.png")));
+const r2 = detectAll(png2.data, png2.width, png2.height);
+const EXPECTED_2 = ["RekSai", "Corki", "Kled", "Jayce", "Sejuani", "Renata"];
+const EXPECTED_2_CIRCLES = [
+  "Malzahar",
+  "AurelionSol",
+  "Fiddlesticks",
+  "MissFortune",
+  "Mel",
+];
+
+test("fixture 2: locates the bench and its six filled champions", () => {
+  assert.ok(r2, "layout should be located in the second screenshot");
+  assert.deepEqual(r2.benchIds, EXPECTED_2);
+});
+
+test("fixture 2: identifies all five team-pick champions", () => {
+  assert.deepEqual(r2.circleIds, EXPECTED_2_CIRCLES);
+});
