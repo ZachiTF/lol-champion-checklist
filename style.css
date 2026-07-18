@@ -45,53 +45,28 @@
   min-width: 250px;
 }
 
-/* Features & guide panel (collapsible, near the top) */
-.features-panel {
-  max-width: 900px;
-  margin: 0 auto 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  overflow: hidden;
+/* Features & guide — a modal overlay opened from the ❔ drawer button. */
+.features-overlay-box {
+  max-width: 620px;
+  max-height: 82vh;
+  overflow-y: auto;
 }
-.features-summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-  color: var(--fg);
-  user-select: none;
+.features-overlay-box h3 {
+  margin: 0 0 6px;
 }
-.features-summary::-webkit-details-marker {
-  display: none;
-}
-.features-summary::before {
-  content: "▸";
-  color: #c89b3c;
-  transition: transform 0.15s ease;
-}
-.features-panel[open] .features-summary::before {
-  transform: rotate(90deg);
-}
-.features-summary:hover {
-  background: var(--card-hover);
-}
-.features-new-dot {
-  font-size: 0.7em;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #7a4c00;
+/* "new features" dot on the ⚙ settings button */
+.settings-new-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   background: #ffcf6b;
-  border-radius: 999px;
-  padding: 2px 8px;
+  border: 2px solid var(--bg);
 }
 .features-body {
-  padding: 4px 16px 16px;
-  border-top: 1px solid var(--hairline);
+  padding: 4px 0 0;
 }
 .features-guide {
   margin: 12px 0 16px;
@@ -368,6 +343,7 @@ body.animations-enabled .progress-bar {
 .animation-toggle,
 .summoner-toggle,
 .quotes-toggle,
+.guide-toggle,
 .scan-toggle {
   background: var(--card-bg, #151a23);
   border: 1px solid rgba(200, 155, 60, 0.3);
@@ -388,6 +364,7 @@ body.animations-enabled .progress-bar {
 .animation-toggle:hover,
 .summoner-toggle:hover,
 .quotes-toggle:hover,
+.guide-toggle:hover,
 .scan-toggle:hover {
   background: var(--card-hover, #1f2633);
   border-color: rgba(200, 155, 60, 0.5);
@@ -404,6 +381,7 @@ body.animations-enabled .progress-bar {
 /* Settings drawer: the ⚙ button reveals the secondary toggles below it */
 .settings-toggle {
   color: inherit;
+  position: relative;
   transition:
     all 0.2s,
     transform 0.3s ease;

@@ -77,29 +77,20 @@ const FEATURE_LIST = [
   },
 ];
 
-function renderFeaturesPanel() {
-  const host = document.getElementById("features-panel");
-  if (!host) return;
-  host.innerHTML = "";
-
+// Is there anything the viewer hasn't seen yet? (drives the "new" dot on ⚙).
+function featuresHasNew() {
   const seen = parseInt(localStorage.getItem(FEATURES_SEEN_KEY) || "0", 10);
-  const hasNew = seen < FEATURES_VERSION;
+  return seen < FEATURES_VERSION;
+}
+// Opening the guide counts as "seen": clears the ⚙ dot for next time.
+function markFeaturesSeen() {
+  localStorage.setItem(FEATURES_SEEN_KEY, String(FEATURES_VERSION));
+  document.querySelectorAll(".settings-new-dot").forEach((d) => d.remove());
+}
 
-  const details = document.createElement("details");
-  details.className = "features-panel";
-
-  const summary = document.createElement("summary");
-  summary.className = "features-summary";
-  summary.innerHTML =
-    '<span class="features-title">✨ Features &amp; guide</span>';
-  if (hasNew) {
-    const dot = document.createElement("span");
-    dot.className = "features-new-dot";
-    dot.textContent = seen === 0 ? "start here" : "new";
-    summary.appendChild(dot);
-  }
-  details.appendChild(summary);
-
+// Build the guide + feature-list body shown inside the overlay.
+function buildFeaturesBody() {
+  const seen = parseInt(localStorage.getItem(FEATURES_SEEN_KEY) || "0", 10);
   const body = document.createElement("div");
   body.className = "features-body";
 
@@ -138,20 +129,41 @@ function renderFeaturesPanel() {
     list.appendChild(li);
   }
   body.appendChild(list);
-  details.appendChild(body);
-
-  // Opening the panel counts as "seen" — clears the dot and the per-item tags.
-  details.addEventListener("toggle", () => {
-    if (details.open && seen < FEATURES_VERSION) {
-      localStorage.setItem(FEATURES_SEEN_KEY, String(FEATURES_VERSION));
-      const dot = summary.querySelector(".features-new-dot");
-      if (dot) dot.remove();
-    }
-  });
-
-  host.appendChild(details);
+  return body;
 }
 
-// Render once on load (kept out of renderAll so the open/closed state survives
-// grid re-renders). The #features-panel div is earlier in the body, so it exists.
-renderFeaturesPanel();
+// Open the guide as a modal overlay (reuses the scan overlay backdrop styling).
+// Triggered from the ❔ button in the settings drawer.
+function openFeaturesOverlay() {
+  if (document.getElementById("features-overlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "features-overlay";
+  overlay.className = "scan-overlay";
+
+  const box = document.createElement("div");
+  box.className = "scan-overlay-box features-overlay-box";
+  const h = document.createElement("h3");
+  h.innerHTML = "✨ Features &amp; guide";
+  box.appendChild(h);
+  box.appendChild(buildFeaturesBody());
+
+  const close = document.createElement("button");
+  close.className = "scan-overlay-close";
+  close.textContent = "×";
+  close.title = "Close";
+  close.onclick = closeFeaturesOverlay;
+  box.appendChild(close);
+
+  overlay.appendChild(box);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeFeaturesOverlay();
+  });
+  document.body.appendChild(overlay);
+  markFeaturesSeen();
+}
+function closeFeaturesOverlay() {
+  document.getElementById("features-overlay")?.remove();
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeFeaturesOverlay();
+});

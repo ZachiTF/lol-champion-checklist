@@ -893,10 +893,30 @@ function renderThemeSwitcher() {
     settingsOpen = !settingsOpen;
     applySettingsDrawerState();
   };
+  // A small dot nudges returning users that the guide has unseen features.
+  if (typeof featuresHasNew === "function" && featuresHasNew()) {
+    const dot = document.createElement("span");
+    dot.className = "settings-new-dot";
+    dot.title = "New features — see the ❔ guide";
+    settingsBtn.appendChild(dot);
+  }
   bar.appendChild(settingsBtn);
 
   const drawer = document.createElement("div");
   drawer.className = "settings-drawer" + (settingsOpen ? " open" : "");
+
+  // Features & guide button — opens the guide overlay (marks it seen).
+  const guideBtn = document.createElement("button");
+  guideBtn.className = "guide-toggle";
+  guideBtn.textContent = "❔";
+  guideBtn.title = "Features & guide";
+  guideBtn.onclick = () => {
+    settingsOpen = false;
+    applySettingsDrawerState();
+    openFeaturesOverlay();
+    renderThemeSwitcher();
+  };
+  drawer.appendChild(guideBtn);
 
   // Animation toggle button
   const animationsEnabled = localStorage.getItem("lol_animations") !== "false";
