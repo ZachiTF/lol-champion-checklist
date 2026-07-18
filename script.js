@@ -172,6 +172,15 @@ function migrateProgressTimestamps(page) {
   if (changed) saveState();
 })();
 
+// Remembers the completion timestamp of champions unmarked during this session,
+// keyed by `${pageId}:${champId}`. Toggling a champion off then on again (an
+// accidental double-click, or just for fun) restores the original date instead
+// of stamping a fresh one, which is almost never what the user wants.
+const clearedTimestamps = new Map();
+function clearedTimestampKey(champId) {
+  return `${state.activePage}:${champId}`;
+}
+
 let champions = [];
 
 // Champion metadata - loaded from data/*.js files as global constants:
@@ -990,7 +999,16 @@ function createChampionCard(champ) {
     }
     hideChampionTooltip();
     const nowDone = !progress[champ.id];
-    progress[champ.id] = nowDone ? new Date().toISOString() : false;
+    const key = clearedTimestampKey(champ.id);
+    if (nowDone) {
+      // Re-marking: reuse the timestamp from before it was toggled off, so an
+      // accidental off/on doesn't wipe the original completion date.
+      progress[champ.id] = clearedTimestamps.get(key) || new Date().toISOString();
+      clearedTimestamps.delete(key);
+    } else {
+      clearedTimestamps.set(key, progress[champ.id]);
+      progress[champ.id] = false;
+    }
     div.classList.toggle("done");
     div.setAttribute("aria-pressed", String(nowDone));
     saveState();
