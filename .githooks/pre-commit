@@ -1,0 +1,13 @@
+#!/bin/sh
+# Tracked pre-commit hook. Enable once per clone with:  npm run hooks:install
+# Mirrors .pre-commit-config.yaml so commits are guarded even without the
+# Python pre-commit framework: Prettier formatting + the test suite must pass.
+set -e
+
+echo "pre-commit: checking formatting…"
+npm run --silent format:check
+
+echo "pre-commit: running tests…"
+npm test --silent
+
+echo "pre-commit: ok"

@@ -1,6 +1,21 @@
+# Runs on `git commit` for anyone using the pre-commit framework
+# (https://pre-commit.com — `pip install pre-commit && pre-commit install`).
+#
+# Environments without Python/pip use the equivalent tracked git hook instead:
+#   npm run hooks:install   (sets core.hooksPath to .githooks/)
+# Both paths enforce the same two checks: Prettier formatting + the test suite.
 repos:
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.0.3
     hooks:
       - id: prettier
         files: \.(js|css|html)$
+        exclude: ^(vendor/|data/) # vendored / generated — see .prettierignore
+  - repo: local
+    hooks:
+      - id: tests
+        name: node --test
+        entry: npm test
+        language: system
+        pass_filenames: false
+        always_run: true
