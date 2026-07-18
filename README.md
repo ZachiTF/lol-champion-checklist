@@ -75,7 +75,7 @@ Copy `config.local.example.js` to `config.local.js` and set:
 
 ```js
 window.APP_CONFIG = {
-	RIOT_API_KEY: "RGAPI-...",
+  RIOT_API_KEY: "RGAPI-...",
 };
 ```
 

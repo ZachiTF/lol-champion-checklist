@@ -105,9 +105,13 @@ document.addEventListener("DOMContentLoaded", () => {
         : [summoner, serverInfo?.label || ""];
       // Step 1: Riot ID → PUUID (summoner-v4 by-name was removed by Riot)
       const accountRes = await fetch(
-        `https://${serverInfo?.cluster}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(
+        `https://${
+          serverInfo?.cluster
+        }.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(
           gameName,
-        )}/${encodeURIComponent(tagLine)}?api_key=${encodeURIComponent(apiKey)}`,
+        )}/${encodeURIComponent(tagLine)}?api_key=${encodeURIComponent(
+          apiKey,
+        )}`,
       );
       if (!accountRes.ok) throw new Error("Player not found.");
       const accountData = await accountRes.json();

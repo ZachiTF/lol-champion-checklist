@@ -108,7 +108,6 @@ function orderedChampions() {
   return championOrder.map((id) => byId.get(id)).filter(Boolean);
 }
 
-
 // --- ELEMENTS ---
 const DEFAULT_COLORS = [
   "#e57373",
@@ -150,4 +149,3 @@ function getProgress() {
   const page = state.pages[state.activePage];
   return page ? page.progress : {};
 }
-

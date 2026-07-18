@@ -19,12 +19,19 @@ const FIX = path.join(__dirname, "fixtures");
 
 // Rebuild the icon-hash Map the pipeline uses: bench squares match the full icon
 // (h/sig); team circles match a center-crop (hC/sigC).
-const iconFixture = JSON.parse(fs.readFileSync(path.join(FIX, "icon-hashes.json"), "utf8"));
+const iconFixture = JSON.parse(
+  fs.readFileSync(path.join(FIX, "icon-hashes.json"), "utf8"),
+);
 const iconHashById = new Map(
-  iconFixture.items.map((it) => [it.id, {
-    h: BigInt("0x" + it.h), sig: it.sig,
-    hC: BigInt("0x" + it.hC), sigC: it.sigC,
-  }]),
+  iconFixture.items.map((it) => [
+    it.id,
+    {
+      h: BigInt("0x" + it.h),
+      sig: it.sig,
+      hC: BigInt("0x" + it.hC),
+      sigC: it.sigC,
+    },
+  ]),
 );
 
 // Decode the screenshot fixture into the same RGBA layout as a canvas ImageData.
@@ -37,14 +44,27 @@ const results = bench.slots.map((slot) => {
   const m = core.matchSlot(buf, W, H, slot, iconHashById);
   return { m, verdict: core.classifyMatch(m) };
 });
-const detected = results.filter((r) => r.verdict !== "reject").map((r) => r.m.id);
+const detected = results
+  .filter((r) => r.verdict !== "reject")
+  .map((r) => r.m.id);
 
-const EXPECTED = ["Gragas", "XinZhao", "Zeri", "Yasuo", "AurelionSol", "Elise", "Lissandra"];
+const EXPECTED = [
+  "Gragas",
+  "XinZhao",
+  "Zeri",
+  "Yasuo",
+  "AurelionSol",
+  "Elise",
+  "Lissandra",
+];
 
 test("detectBenchRow finds a plausible 10-slot bench", () => {
   assert.ok(bench, "bench row should be detected");
   assert.equal(bench.slots.length, 10);
-  assert.ok(bench.bandH > 20 && bench.bandH < 120, `bandH ${bench.bandH} out of range`);
+  assert.ok(
+    bench.bandH > 20 && bench.bandH < 120,
+    `bandH ${bench.bandH} out of range`,
+  );
 });
 
 test("detects exactly the seven filled champions, in bench order", () => {
@@ -74,7 +94,10 @@ test("empty slots sit far from any champion in color space", () => {
   // separation. Every rejected slot's best match should be clearly far.
   const rejects = results.filter((r) => r.verdict === "reject");
   for (const { m } of rejects) {
-    assert.ok(m.color > core.SCAN_MAYBE_COLOR, `reject color ${m.color} too close`);
+    assert.ok(
+      m.color > core.SCAN_MAYBE_COLOR,
+      `reject color ${m.color} too close`,
+    );
   }
 });
 
@@ -84,7 +107,9 @@ const circleResults = (circles || []).map((c) => {
   const m = core.matchCircle(buf, W, H, c, iconHashById);
   return { m, verdict: core.classifyCircleMatch(m) };
 });
-const circleIds = circleResults.filter((r) => r.verdict !== "reject").map((r) => r.m.id);
+const circleIds = circleResults
+  .filter((r) => r.verdict !== "reject")
+  .map((r) => r.m.id);
 const EXPECTED_CIRCLES = ["Velkoz", "Malphite", "Vex", "Xerath", "Aphelios"];
 
 test("detectTeamCircles finds the five team portraits", () => {

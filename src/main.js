@@ -1,6 +1,5 @@
 // App bootstrap: theme/animation init and the Data Dragon champion-data load.
 
-
 // --- MAIN ---
 // Initialize theme on load
 setTheme(localStorage.getItem("lol_theme") || "auto");
@@ -10,8 +9,12 @@ const animationsEnabled = localStorage.getItem("lol_animations") !== "false";
 document.body.classList.toggle("animations-enabled", animationsEnabled);
 
 // Initialize summoner search (hidden by default — feature requires API key)
-const summonerSearchVisible = localStorage.getItem("lol_summoner_search") === "true";
-document.body.classList.toggle("summoner-search-hidden", !summonerSearchVisible);
+const summonerSearchVisible =
+  localStorage.getItem("lol_summoner_search") === "true";
+document.body.classList.toggle(
+  "summoner-search-hidden",
+  !summonerSearchVisible,
+);
 
 // Listen for system theme changes when in auto mode
 window

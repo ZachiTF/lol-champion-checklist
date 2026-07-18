@@ -150,7 +150,11 @@ window.Celebrations = (function () {
               typeof regionCrestUrl === "function"
                 ? regionCrestUrl(region)
                 : null;
-            showBanner(`${region} complete — every champion played!`, "region", crestUrl);
+            showBanner(
+              `${region} complete — every champion played!`,
+              "region",
+              crestUrl,
+            );
             return;
           }
         }

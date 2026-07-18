@@ -1410,15 +1410,9 @@ body.summoner-search-hidden .wip-notice {
 .achievement-banner.complete {
   border: 1px solid transparent;
   background:
-    linear-gradient(var(--card-bg, #151a23), var(--card-bg, #151a23)) padding-box,
-    linear-gradient(
-        90deg,
-        #e57373,
-        #ffd54f,
-        #81c784,
-        #64b5f6,
-        #ba68c8
-      )
+    linear-gradient(var(--card-bg, #151a23), var(--card-bg, #151a23))
+      padding-box,
+    linear-gradient(90deg, #e57373, #ffd54f, #81c784, #64b5f6, #ba68c8)
       border-box;
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.45),

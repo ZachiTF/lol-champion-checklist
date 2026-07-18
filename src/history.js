@@ -1,6 +1,5 @@
 // Progress history timeline (per-day completion chart).
 
-
 // --- PROGRESS HISTORY (timeline) ---
 const DAY_MS = 86400000;
 
@@ -96,9 +95,9 @@ function renderHistory() {
     const dayIndex = Math.round(
       (startOfLocalDay(entry.time) - firstDay) / DAY_MS,
     );
-    buckets[Math.min(Math.floor(dayIndex / bucketDays), bucketCount - 1)].names.push(
-      entry.name,
-    );
+    buckets[
+      Math.min(Math.floor(dayIndex / bucketDays), bucketCount - 1)
+    ].names.push(entry.name);
   }
   const maxCount = Math.max(...buckets.map((b) => b.names.length));
 
@@ -166,10 +165,7 @@ function renderHistory() {
     slot.className = "history-slot";
     const count = bucket.names.length;
 
-    const rangeEnd = Math.min(
-      bucket.start + (bucketDays - 1) * DAY_MS,
-      today,
-    );
+    const rangeEnd = Math.min(bucket.start + (bucketDays - 1) * DAY_MS, today);
     const dateText =
       bucketDays === 1 || rangeEnd === bucket.start
         ? formatDay(bucket.start, true)
@@ -178,7 +174,10 @@ function renderHistory() {
     if (count > 0) {
       const bar = document.createElement("div");
       bar.className = "history-bar";
-      bar.style.height = `${Math.max(6, Math.round((count / maxCount) * 100))}%`;
+      bar.style.height = `${Math.max(
+        6,
+        Math.round((count / maxCount) * 100),
+      )}%`;
       slot.appendChild(bar);
       slot.tabIndex = 0;
       slot.setAttribute(
@@ -210,8 +209,14 @@ function renderHistory() {
         const boxRect = box.getBoundingClientRect();
         const slotRect = slot.getBoundingClientRect();
         let left =
-          slotRect.left - boxRect.left + slotRect.width / 2 - tip.offsetWidth / 2;
-        left = Math.max(4, Math.min(left, box.clientWidth - tip.offsetWidth - 4));
+          slotRect.left -
+          boxRect.left +
+          slotRect.width / 2 -
+          tip.offsetWidth / 2;
+        left = Math.max(
+          4,
+          Math.min(left, box.clientWidth - tip.offsetWidth - 4),
+        );
         tip.style.left = `${left}px`;
         tip.style.top = `${chart.offsetTop - tip.offsetHeight - 6}px`;
       };

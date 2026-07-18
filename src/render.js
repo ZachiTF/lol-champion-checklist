@@ -438,7 +438,6 @@ function toggleTabMenu() {
   window.addEventListener("resize", positionTabMenu);
 })();
 
-
 function setRegionCount(el, { done, total }) {
   el.textContent = `${done}/${total} done`;
   el.classList.toggle("complete", total > 0 && done === total);
@@ -704,7 +703,10 @@ function populateFilterOptions() {
   harmonyFilters.forEach((filterName) => {
     const opt = document.createElement("option");
     opt.value = filterName;
-    opt.textContent = filterOptionLabel(filterName, HARMONY_FILTERS[filterName]);
+    opt.textContent = filterOptionLabel(
+      filterName,
+      HARMONY_FILTERS[filterName],
+    );
     harmonySelect.appendChild(opt);
   });
 }
@@ -914,7 +916,8 @@ function renderThemeSwitcher() {
   drawer.appendChild(animBtn);
 
   // Summoner search toggle button
-  const summonerVisible = localStorage.getItem("lol_summoner_search") === "true";
+  const summonerVisible =
+    localStorage.getItem("lol_summoner_search") === "true";
   const summonerBtn = document.createElement("button");
   summonerBtn.className =
     "summoner-toggle" + (summonerVisible ? "" : " disabled");
@@ -975,4 +978,3 @@ function renderThemeSwitcher() {
     }
   });
 })();
-

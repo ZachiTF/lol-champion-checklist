@@ -192,7 +192,9 @@ async function main() {
     for (const [challengeId, refKey] of Object.entries(CHALLENGE_IDS)) {
       const challenge = lcu[challengeId];
       if (!challenge || !Array.isArray(challenge.availableIds)) {
-        console.warn(`  ! challenge ${challengeId} (${refKey}) missing in LCU data — keeping old list`);
+        console.warn(
+          `  ! challenge ${challengeId} (${refKey}) missing in LCU data — keeping old list`,
+        );
         continue;
       }
       const ids = [];
@@ -204,7 +206,9 @@ async function main() {
       referenceData[refKey] = ids.sort();
     }
     if (skipped.size) {
-      console.log(`  (ignored non-roster champion ids: ${[...skipped].join(", ")})\n`);
+      console.log(
+        `  (ignored non-roster champion ids: ${[...skipped].join(", ")})\n`,
+      );
     }
     // Preserve any lists the LCU couldn't provide.
     const old = JSON.parse(fs.readFileSync(REFERENCE_PATH, "utf8"));
@@ -251,16 +255,14 @@ async function main() {
 
   // Build Harmony filters
   const harmonyFilters = {};
-  Object.entries(HARMONY_CHALLENGES).forEach(
-    ([challengeName, displayName]) => {
-      if (referenceData[challengeName]) {
-        harmonyFilters[displayName] = {
-          description: challengeName,
-          champions: referenceData[challengeName].sort(),
-        };
-      }
-    },
-  );
+  Object.entries(HARMONY_CHALLENGES).forEach(([challengeName, displayName]) => {
+    if (referenceData[challengeName]) {
+      harmonyFilters[displayName] = {
+        description: challengeName,
+        champions: referenceData[challengeName].sort(),
+      };
+    }
+  });
 
   // Display stats
   console.log(

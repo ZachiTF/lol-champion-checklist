@@ -169,10 +169,7 @@ function showChampionTooltip(card, champ) {
   const height = tip.offsetHeight;
 
   let left = rect.left + rect.width / 2 - width / 2;
-  left = Math.max(
-    margin,
-    Math.min(left, window.innerWidth - width - margin),
-  );
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
 
   // Prefer above the card; fall back to below near the top of the viewport.
   let top = rect.top - height - margin;
@@ -284,7 +281,8 @@ function createChampionCard(champ) {
     if (nowDone) {
       // Re-marking: reuse the timestamp from before it was toggled off, so an
       // accidental off/on doesn't wipe the original completion date.
-      progress[champ.id] = clearedTimestamps.get(key) || new Date().toISOString();
+      progress[champ.id] =
+        clearedTimestamps.get(key) || new Date().toISOString();
       clearedTimestamps.delete(key);
     } else {
       clearedTimestamps.set(key, progress[champ.id]);
@@ -318,13 +316,17 @@ function createChampionCard(champ) {
   div.addEventListener("focus", () => showChampionTooltip(div, champ));
   div.addEventListener("blur", hideChampionTooltip);
 
-  div.addEventListener("touchstart", () => {
-    longPressFired = false;
-    longPressTimer = setTimeout(() => {
-      longPressFired = true;
-      showChampionTooltip(div, champ);
-    }, LONG_PRESS_MS);
-  }, { passive: true });
+  div.addEventListener(
+    "touchstart",
+    () => {
+      longPressFired = false;
+      longPressTimer = setTimeout(() => {
+        longPressFired = true;
+        showChampionTooltip(div, champ);
+      }, LONG_PRESS_MS);
+    },
+    { passive: true },
+  );
   const cancelLongPress = () => clearTimeout(longPressTimer);
   div.addEventListener("touchmove", cancelLongPress, { passive: true });
   div.addEventListener("touchend", cancelLongPress, { passive: true });

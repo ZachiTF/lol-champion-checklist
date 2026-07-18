@@ -19,7 +19,6 @@ let scanState = { ids: [], uncertain: new Set(), active: false };
 let iconHashes = null;
 const ICON_HASH_STORE = "lol_icon_hashes"; // localStorage cache, keyed by patch
 
-
 function loadCrossOriginImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -37,12 +36,22 @@ async function ensureIconHashes(onProgress) {
   if (iconHashes && iconHashes.patch === PATCH) return iconHashes;
   try {
     const raw = JSON.parse(localStorage.getItem(ICON_HASH_STORE) || "null");
-    if (raw && raw.v === ICON_HASH_VERSION && raw.patch === PATCH && Array.isArray(raw.items)) {
+    if (
+      raw &&
+      raw.v === ICON_HASH_VERSION &&
+      raw.patch === PATCH &&
+      Array.isArray(raw.items)
+    ) {
       const byId = new Map(
-        raw.items.map((it) => [it.id, {
-          h: BigInt("0x" + it.h), sig: it.sig,
-          hC: BigInt("0x" + it.hC), sigC: it.sigC,
-        }]),
+        raw.items.map((it) => [
+          it.id,
+          {
+            h: BigInt("0x" + it.h),
+            sig: it.sig,
+            hC: BigInt("0x" + it.hC),
+            sigC: it.sigC,
+          },
+        ]),
       );
       iconHashes = { patch: PATCH, byId };
       return iconHashes;
@@ -60,9 +69,13 @@ async function ensureIconHashes(onProgress) {
     while (queue.length) {
       const champ = queue.shift();
       try {
-        const img = await loadCrossOriginImage(CHAMPION_ICON_BASE + champ.image.full);
-        const w = img.naturalWidth, h = img.naturalHeight;
-        canvas.width = w; canvas.height = h;
+        const img = await loadCrossOriginImage(
+          CHAMPION_ICON_BASE + champ.image.full,
+        );
+        const w = img.naturalWidth,
+          h = img.naturalHeight;
+        canvas.width = w;
+        canvas.height = h;
         ctx.drawImage(img, 0, 0);
         const buf = ctx.getImageData(0, 0, w, h).data;
         // Bench squares match the full icon; team circles match a center-crop.
@@ -75,8 +88,10 @@ async function ensureIconHashes(onProgress) {
         byId.set(champ.id, { h: hash, sig, hC: hashC, sigC });
         items.push({
           id: champ.id,
-          h: hash.toString(16).padStart(16, "0"), sig,
-          hC: hashC.toString(16).padStart(16, "0"), sigC,
+          h: hash.toString(16).padStart(16, "0"),
+          sig,
+          hC: hashC.toString(16).padStart(16, "0"),
+          sigC,
         });
       } catch (_) {
         /* skip an icon that fails to load; matching just won't offer it */
@@ -88,30 +103,46 @@ async function ensureIconHashes(onProgress) {
   await Promise.all(Array.from({ length: CONC }, worker));
   iconHashes = { patch: PATCH, byId };
   try {
-    localStorage.setItem(ICON_HASH_STORE, JSON.stringify({ v: ICON_HASH_VERSION, patch: PATCH, items }));
+    localStorage.setItem(
+      ICON_HASH_STORE,
+      JSON.stringify({ v: ICON_HASH_VERSION, patch: PATCH, items }),
+    );
   } catch (_) {}
   return iconHashes;
 }
 
 // Run the whole pipeline on a loaded image element.
 async function runScanFromImage(img, setStatus) {
-  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-  if (!w || !h) { setStatus("That image looks empty.", true); return; }
+  const w = img.naturalWidth || img.width,
+    h = img.naturalHeight || img.height;
+  if (!w || !h) {
+    setStatus("That image looks empty.", true);
+    return;
+  }
   const canvas = document.createElement("canvas");
-  canvas.width = w; canvas.height = h;
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   const buf = ctx.getImageData(0, 0, w, h).data;
 
   const bench = detectBenchRow(buf, w, h);
   if (!bench) {
-    setStatus("Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.", true);
+    setStatus(
+      "Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.",
+      true,
+    );
     return;
   }
 
   setStatus("Preparing champion database…");
-  await ensureIconHashes((d, t) => setStatus(`Preparing champion database… ${d}/${t}`));
-  if (!iconHashes.byId.size) { setStatus("Couldn't load champion icons (offline?).", true); return; }
+  await ensureIconHashes((d, t) =>
+    setStatus(`Preparing champion database… ${d}/${t}`),
+  );
+  if (!iconHashes.byId.size) {
+    setStatus("Couldn't load champion icons (offline?).", true);
+    return;
+  }
 
   setStatus("Identifying champions…");
   const ids = [];
@@ -134,13 +165,18 @@ async function runScanFromImage(img, setStatus) {
   }
 
   if (!ids.length) {
-    setStatus("No champions recognized. Try a sharper, unscaled screenshot of the champion-select screen.", true);
+    setStatus(
+      "No champions recognized. Try a sharper, unscaled screenshot of the champion-select screen.",
+      true,
+    );
     return;
   }
   scanState = { ids, uncertain, active: true };
   closeScanOverlay();
   renderScanResults();
-  document.getElementById("scan-results")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  document
+    .getElementById("scan-results")
+    ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // ---- the pinned "Available now" group above the grid ----
@@ -155,7 +191,9 @@ function refreshScanCount() {
   if (!el) return;
   const { done, total } = scanDoneCount();
   const missing = total - done;
-  el.textContent = missing ? `${missing} still needed · ${done}/${total} done` : `all ${total} done ✓`;
+  el.textContent = missing
+    ? `${missing} still needed · ${done}/${total} done`
+    : `all ${total} done ✓`;
   el.classList.toggle("complete", missing === 0);
 }
 function syncChampionCardState(champId, nowDone) {
@@ -212,7 +250,8 @@ function renderScanResults() {
     const card = createChampionCard(champ);
     if (scanState.uncertain.has(id)) {
       card.classList.add("scan-uncertain");
-      card.title = (card.title ? card.title + " — " : "") + "uncertain match, verify";
+      card.title =
+        (card.title ? card.title + " — " : "") + "uncertain match, verify";
     }
     grid.appendChild(card);
   });
@@ -224,13 +263,20 @@ function renderScanResults() {
 // ---- overlay (button path) + global paste / drag-drop ----
 function firstImageFromItems(items) {
   for (const it of items || []) {
-    if (it.kind === "file" && it.type.startsWith("image/")) return it.getAsFile();
+    if (it.kind === "file" && it.type.startsWith("image/"))
+      return it.getAsFile();
   }
   return null;
 }
 async function handleScanFile(file, setStatus) {
-  if (!file) { setStatus("No image found — copy a screenshot first.", true); return; }
-  if (!champions.length) { setStatus("Champion data is still loading — try again in a moment.", true); return; }
+  if (!file) {
+    setStatus("No image found — copy a screenshot first.", true);
+    return;
+  }
+  if (!champions.length) {
+    setStatus("Champion data is still loading — try again in a moment.", true);
+    return;
+  }
   setStatus("Reading screenshot…");
   const url = URL.createObjectURL(file);
   try {
@@ -261,7 +307,10 @@ function openScanOverlay() {
   input.className = "scan-file";
   const setStatus = (msg, isErr) => {
     const s = box.querySelector(".scan-status");
-    if (s) { s.textContent = msg; s.classList.toggle("error", !!isErr); }
+    if (s) {
+      s.textContent = msg;
+      s.classList.toggle("error", !!isErr);
+    }
   };
   input.onchange = () => handleScanFile(input.files[0], setStatus);
   box.appendChild(input);
@@ -273,11 +322,17 @@ function openScanOverlay() {
   box.appendChild(close);
 
   overlay.appendChild(box);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeScanOverlay(); });
-  overlay.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("dragover"); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeScanOverlay();
+  });
+  overlay.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    box.classList.add("dragover");
+  });
   overlay.addEventListener("dragleave", () => box.classList.remove("dragover"));
   overlay.addEventListener("drop", (e) => {
-    e.preventDefault(); box.classList.remove("dragover");
+    e.preventDefault();
+    box.classList.remove("dragover");
     handleScanFile(e.dataTransfer.files[0], setStatus);
   });
   document.body.appendChild(overlay);
@@ -296,7 +351,10 @@ document.addEventListener("paste", (e) => {
   if (!document.getElementById("scan-overlay")) openScanOverlay();
   const setStatus = (msg, isErr) => {
     const s = document.querySelector("#scan-overlay .scan-status");
-    if (s) { s.textContent = msg; s.classList.toggle("error", !!isErr); }
+    if (s) {
+      s.textContent = msg;
+      s.classList.toggle("error", !!isErr);
+    }
   };
   handleScanFile(file, setStatus);
 });
