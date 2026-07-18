@@ -17,6 +17,16 @@ const core = require("../src/scan-core.js");
 
 const FIX = path.join(__dirname, "fixtures");
 
+// The augmentation sweeps re-run the locate stage on many variants and are slow;
+// gate them so the pre-commit run stays quick. Enable with SCAN_FULL=1 (or
+// `npm run test:full`) for the complete robustness suite.
+const SLOW =
+  process.env.SCAN_FULL === "1"
+    ? {}
+    : {
+        skip: "slow; run `npm run test:full` (SCAN_FULL=1) for the full sweep",
+      };
+
 // Rebuild the icon-hash Map the pipeline uses: bench squares match the full icon
 // (h/sig); team circles match a center-crop (hC/sigC).
 const iconFixture = JSON.parse(
@@ -184,6 +194,87 @@ function detectAll(b, w, h) {
   return { bench, benchIds, circleIds: circleIds2 };
 }
 
+// ---- augmentation helpers (realistic screenshot variations) ----
+const clampByte = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+function lcg(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+function addNoise(b, amp, seed) {
+  const rnd = lcg(seed),
+    o = Buffer.from(b);
+  for (let i = 0; i < o.length; i += 4) {
+    const n = (rnd() - 0.5) * 2 * amp;
+    o[i] = clampByte(o[i] + n);
+    o[i + 1] = clampByte(o[i + 1] + n);
+    o[i + 2] = clampByte(o[i + 2] + n);
+  }
+  return o;
+}
+function blur3(b, W, H) {
+  const o = Buffer.from(b);
+  for (let y = 1; y < H - 1; y++)
+    for (let x = 1; x < W - 1; x++)
+      for (let c = 0; c < 3; c++) {
+        let s = 0;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++)
+            s += b[((y + dy) * W + (x + dx)) * 4 + c];
+        o[(y * W + x) * 4 + c] = Math.round(s / 9);
+      }
+  return o;
+}
+// A cheap stand-in for JPEG recompression: soften, then quantize each channel.
+function jpegish(b, W, H) {
+  const o = blur3(b, W, H);
+  for (let i = 0; i < o.length; i += 4) {
+    o[i] = clampByte(Math.round(o[i] / 8) * 8);
+    o[i + 1] = clampByte(Math.round(o[i + 1] / 8) * 8);
+    o[i + 2] = clampByte(Math.round(o[i + 2] / 8) * 8);
+  }
+  return o;
+}
+// The realistic variations a pasted screenshot may have undergone. (Global
+// brightness/contrast shifts are intentionally excluded: a screen capture is
+// pixel-exact, and the absolute color signature is what separates filled bench
+// slots from empty ones.)
+function augmentations(buf, W, H) {
+  const scaled = (f) => {
+    const CW = Math.round(W * f) + 60,
+      CH = Math.round(H * f) + 60;
+    return { b: embed(buf, W, H, CW, CH, 30, 30, f), w: CW, h: CH };
+  };
+  return [
+    { name: "scale 0.90", ...scaled(0.9) },
+    { name: "scale 0.95", ...scaled(0.95) },
+    { name: "scale 1.05", ...scaled(1.05) },
+    { name: "blur 3x3", b: blur3(buf, W, H), w: W, h: H },
+    { name: "noise +-10", b: addNoise(buf, 10, 7), w: W, h: H },
+    {
+      name: "offset",
+      b: embed(buf, W, H, W + 240, H + 160, 140, 90, 1.0),
+      w: W + 240,
+      h: H + 160,
+    },
+    { name: "jpeg-ish", b: jpegish(buf, W, H), w: W, h: H },
+  ];
+}
+function assertRobust(label, buf, W, H, expBench, expCircles) {
+  for (const v of augmentations(buf, W, H)) {
+    const r = detectAll(v.b, v.w, v.h);
+    assert.ok(r, `${label} / ${v.name}: layout not found`);
+    assert.deepEqual(r.benchIds, expBench, `${label} / ${v.name}: bench`);
+    const ok = r.circleIds.filter((id) => expCircles.includes(id)).length;
+    assert.ok(
+      ok >= 4,
+      `${label} / ${v.name}: only ${ok}/5 circles (${r.circleIds})`,
+    );
+  }
+}
+
 test("locates the bench when the client is offset in a larger frame", () => {
   const CW = 1900,
     CH = 1100,
@@ -299,4 +390,24 @@ test("locates the bench under a higher-contrast distractor (browser chrome)", ()
   );
   assert.deepEqual(r.benchIds, EXPECTED);
   assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
+});
+
+// ---- augmentation robustness: each fixture through realistic variations ----
+// The fit (locate + bench) must survive rescaling, resampling softness, mild
+// noise, translation, and JPEG-style recompression — the things a real pasted
+// screenshot has been through. Bench is asserted exactly; circles (the borderline
+// dark portraits) must keep at least 4 of 5.
+test("fixture 1 detection is robust to realistic augmentations", SLOW, () => {
+  assertRobust("fixture1", buf, W, H, EXPECTED, EXPECTED_CIRCLES);
+});
+
+test("fixture 2 detection is robust to realistic augmentations", SLOW, () => {
+  assertRobust(
+    "fixture2",
+    png2.data,
+    png2.width,
+    png2.height,
+    EXPECTED_2,
+    EXPECTED_2_CIRCLES,
+  );
 });

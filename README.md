@@ -135,6 +135,11 @@ files to the Prettier style. (Users of the Python
 [pre-commit](https://pre-commit.com) framework can `pre-commit install`
 instead — `.pre-commit-config.yaml` enforces the same two checks.)
 
+`npm test` skips the slow scan-robustness sweeps (which augment each screenshot
+fixture — rescale, blur, noise, offset, JPEG-recompress — and re-run the locate
+stage on every variant). Run the full suite with `npm run test:full` before
+pushing scan changes.
+
 ## Related tools
 
 - https://github.com/AlexDerr/ChallengeComps

@@ -5,6 +5,7 @@
   "scripts": {
     "update-data": "node scripts/update-champion-data.js",
     "test": "node --test",
+    "test:full": "SCAN_FULL=1 node --test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "hooks:install": "git config core.hooksPath .githooks"
