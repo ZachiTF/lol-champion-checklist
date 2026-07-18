@@ -238,6 +238,40 @@ test("fixture 2: identifies all five team-pick champions", () => {
   assert.deepEqual(r2.circleIds, EXPECTED_2_CIRCLES);
 });
 
+// ---- a REAL windowed client on a busy desktop (the hardest real case) ----
+// A full-screen capture where the League client is a window over the browser
+// (high-edge tab/URL chrome) AND this app's own champion grid — champion icons in
+// the background that could be mistaken for the bench. PII (tabs, summoner names,
+// chat, taskbar) is pixelated; the window + champion grid are pristine.
+const png3 = PNG.sync.read(fs.readFileSync(path.join(FIX, "aram-desktop.png")));
+const r3 = detectAll(png3.data, png3.width, png3.height);
+const EXPECTED_3 = [
+  "Graves",
+  "Nilah",
+  "Braum",
+  "Talon",
+  "Blitzcrank",
+  "Thresh",
+  "Nautilus",
+  "Elise",
+];
+const EXPECTED_3_CIRCLES = [
+  "Nidalee",
+  "Tristana",
+  "Pantheon",
+  "MissFortune",
+  "Ashe",
+];
+
+test("desktop: locates the windowed client amid browser chrome + champion grid", () => {
+  assert.ok(r3, "layout should be located in the busy full-screen capture");
+  assert.deepEqual(r3.benchIds, EXPECTED_3);
+});
+
+test("desktop: identifies all five team-pick champions", () => {
+  assert.deepEqual(r3.circleIds, EXPECTED_3_CIRCLES);
+});
+
 // ---- windowed client on a busy desktop (browser chrome + high-contrast UI) ----
 // Reproduces the real failure: a full-screen print where the League client is a
 // window and other UI has FAR higher edge energy than the bench. The old locator
