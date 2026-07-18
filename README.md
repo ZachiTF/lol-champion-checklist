@@ -109,7 +109,7 @@ to the committed snapshot. See `data/README.md` for details.
 
 - `index.html` — app shell (loads the `src/` scripts in order)
 - `src/` — app logic, split by concern (classic scripts sharing globals, no build step):
-  - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested). Locates the ARAM client/bench/circles anywhere in the frame and at any scale, so a full-desktop print screen works — not just a tightly cropped client
+  - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested). Locates the ARAM client/bench/circles anywhere in the frame and at any scale — a full-desktop print screen works, even with the client windowed over a busy background (browser chrome, other champion grids), by finding the bench through periodicity + champion content rather than fixed positions
   - `scan-ui.js` — scan overlay, paste/drop, icon hashing, the "Available now" group
   - `state.js` · `champions.js` · `render.js` · `history.js` · `riot-api.js` · `main.js`
 - `style.css` — styling

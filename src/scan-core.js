@@ -141,19 +141,6 @@ function contiguousRuns(S, thr) {
   if (st >= 0) out.push([st, S.length - 1]);
   return out;
 }
-// Moving sum over a centered window of width w.
-function boxSum1d(A, w) {
-  const n = A.length,
-    out = new Float64Array(n),
-    h = Math.floor(w / 2);
-  let acc = 0;
-  for (let i = 0; i < n; i++) {
-    acc += A[i];
-    if (i - w >= 0) acc -= A[i - w];
-    if (i - h >= 0) out[i - h] = acc;
-  }
-  return out;
-}
 // Column vertical-edge energy summed over rows [yt,yb].
 function colEdgeProfile(buf, W, yt, yb) {
   const C = new Float64Array(W);
@@ -165,17 +152,6 @@ function colEdgeProfile(buf, W, yt, yb) {
   }
   return C;
 }
-// Column saturation (colorfulness) summed over rows [yt,yb].
-function colSatProfile(buf, W, yt, yb) {
-  const V = new Float64Array(W);
-  for (let x = 0; x < W; x++) {
-    let s = 0;
-    for (let y = yt; y <= yb; y++) s += pxSat(buf, W, x, y);
-    V[x] = s;
-  }
-  return V;
-}
-
 // ---- layout calibration (measured on a native 1274x706 ARAM client) ----
 const BENCH_SPAN_FRAC = 0.463; // (10*pitch) / clientWidth
 const BENCH_CY_FRAC = 0.0439; // bench center y / clientHeight
@@ -184,16 +160,102 @@ const CIRCLE_CX_FRAC = 0.0651; // team-circle column center x / clientWidth
 const CIRCLE_SIZE_FRAC = 0.81; // circle inscribed square / bench pitch
 const ICON_TO_PITCH = 0.78; // bench icon side / pitch (icons are ~square)
 
+const BENCH_PITCH_MIN = 30; // plausible bench-icon pitch in px (rules out thin
+const BENCH_PITCH_MAX = 100; // texture and tall low-frequency structure)
+const BENCH_FILL_COLOR = 18; // color distance below this = a real champion icon
+const BENCH_TEETH = 11; // a 10-slot bench has 11 icon-border columns
+
+// A small, reliable champion match at one position (a couple of sizes + a tiny
+// offset), returning the best color distance — low means a real champion icon
+// sits here. Used to locate the bench by champion CONTENT, not brightness.
+function benchProbeColor(buf, W, H, cx, cy, size, iconHashById, off) {
+  let best = Infinity;
+  for (const s of [size, size - 4, size + 4]) {
+    if (s < 16) continue;
+    for (let dx = -off; dx <= off; dx += off) {
+      const x0 = Math.round(cx - s / 2 + dx),
+        y0 = Math.round(cy - s / 2);
+      const h = dHashRegion(buf, W, H, x0, y0, s, s);
+      const cands = [];
+      iconHashById.forEach((v, id) => cands.push({ id, d: hamming64(h, v.h) }));
+      cands.sort((a, b) => a.d - b.d);
+      const t = Math.round(s * 0.04);
+      const sig = colorSigRegion(
+        buf,
+        W,
+        H,
+        x0 + t,
+        y0 + t,
+        s - 2 * t,
+        s - 2 * t,
+      );
+      for (let i = 0; i < 5 && i < cands.length; i++) {
+        const c = colorDist(sig, iconHashById.get(cands[i].id).sig);
+        if (c < best) best = c;
+      }
+    }
+  }
+  return best;
+}
+
+// Resolve the bench's horizontal phase within a band by CHAMPION content. Grid-
+// sample champion-match confidence across the band, then pick the 10-slot
+// alignment (spacing = pitch) that lands the most champions in a left-packed run
+// (champions fill the bench left-to-right). Robust to a bright central splash and
+// to empty trailing slots, which brightness/edge phase cues get wrong. Returns
+// the left border x0 of slot 0, plus the champion count, or null.
+function benchPhaseByContent(buf, W, H, yt, yb, pitch, size, iconHashById) {
+  const cy = (yt + yb) / 2;
+  const g = Math.max(2, Math.round(pitch / 6));
+  const off = Math.max(2, Math.round(g / 2));
+  const xs0 = Math.round(size / 2);
+  const champ = [];
+  for (let x = xs0; x < W - size / 2; x += g)
+    champ.push(benchProbeColor(buf, W, H, x, cy, size, iconHashById, off));
+  const champAt = (cx) => {
+    const idx = Math.round((cx - xs0) / g);
+    return idx >= 0 && idx < champ.length ? champ[idx] : Infinity;
+  };
+  let x0 = null,
+    bestScore = -1,
+    bestN = 0;
+  const maxC0 = W - 1 - 9 * pitch;
+  for (let c0 = xs0; c0 <= maxC0; c0 += g) {
+    let first = -1,
+      n = 0,
+      graded = 0;
+    for (let i = 0; i < 10; i++) {
+      const c = champAt(c0 + pitch * i);
+      if (c <= BENCH_FILL_COLOR) {
+        if (first < 0) first = i;
+        n++;
+        graded += 22 - c; // graded score centers the grid on the icons
+      }
+    }
+    if (n < 3 || first !== 0) continue; // slot 0 must sit on a champion
+    if (graded > bestScore) {
+      bestScore = graded;
+      x0 = Math.round(c0 - pitch / 2);
+      bestN = n;
+    }
+  }
+  return x0 == null ? null : { x0, n: bestN };
+}
+
 // Stage 0 — find the "Available Champions" bench bar ANYWHERE in the image, at
-// any scale. The bench is a horizontal strip of ~square icons: two couplings
-// make it unique vs. desktop clutter — (a) icons are square, so pitch ≈ 1.28*bandH;
-// (b) the strip repeats ~10x. We pick the horizontal band whose column-edge
-// profile is most periodic at a square-consistent pitch (an 11-tooth comb over
-// icon borders), then anchor the grid's phase on the most colorful icon (a filled
-// champion) and walk left to slot 0, since champions fill the bench left-to-right.
+// any scale, even amid browser chrome or an adversarial champion-grid background.
+// (1) Candidate bands = LOCAL maxima of the row edge profile (never gated by the
+//     global max, so the bench survives when other content is far higher-contrast).
+// (2) Select band + pitch by height-normalized periodicity (an 11-tooth comb over
+//     icon borders), constrained to a plausible icon pitch — the bench is the most
+//     periodic square-icon row.
+// (3) Resolve the horizontal phase by champion CONTENT (benchPhaseByContent), not
+//     brightness. Try candidate bands strongest-first until one yields a champion
+//     run. Needs iconHashById (Map champId -> { h:BigInt, sig:number[27] }).
 // Returns { pitch, size, slots:[{cx,cy,size}], bandH, cy, yt, yb, xLeft, xRight,
 // center } in image coordinates, or null.
-function findBenchBar(buf, W, H) {
+function findBenchBar(buf, W, H, iconHashById) {
+  if (!iconHashById || !iconHashById.size) return null;
   const R = new Float64Array(H);
   for (let y = 0; y < H; y++) {
     let s = 0;
@@ -205,18 +267,40 @@ function findBenchBar(buf, W, H) {
   let maxR = 0;
   for (const v of S) if (v > maxR) maxR = v;
   if (maxR <= 0) return null;
-  const bands = contiguousRuns(S, maxR * 0.45);
-  const TEETH = 11; // a 10-slot bench has 11 icon-border columns
-  let best = null;
-  for (const [yt, yb] of bands) {
+  // Inclusive candidate band centers: local maxima of the row edge profile. The
+  // floor is deliberately low (not gated on the global max) so the bench survives
+  // even when other UI — browser chrome, high-contrast panels — has far higher
+  // edge energy; non-champion bands are rejected later by content verification.
+  const peaks = [];
+  for (let y = 2; y < H - 2; y++)
+    if (
+      S[y] > maxR * 0.02 &&
+      S[y] >= S[y - 1] &&
+      S[y] >= S[y - 2] &&
+      S[y] > S[y + 1] &&
+      S[y] > S[y + 2]
+    )
+      peaks.push(y);
+  peaks.sort((a, b) => S[b] - S[a]);
+  const seen = new Set();
+  const cands = [];
+  for (let pi = 0; pi < peaks.length && pi < 40; pi++) {
+    const cy0 = peaks[pi],
+      pv = S[cy0];
+    let yt = cy0,
+      yb = cy0;
+    while (yt > 0 && S[yt - 1] > pv * 0.5 && cy0 - yt < H * 0.12) yt--;
+    while (yb < H - 1 && S[yb + 1] > pv * 0.5 && yb - cy0 < H * 0.12) yb++;
     const bh = yb - yt + 1;
-    if (bh < 10 || bh > H * 0.22) continue;
+    if (bh < 22 || bh > H * 0.16) continue;
+    const key = yt + "_" + yb;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const C = smooth1d(colEdgeProfile(buf, W, yt, yb), 1);
-    // icons are square: seed the pitch search near 1.28*bandH via autocorrelation.
     const pExp = bh * 1.28;
-    const pmin = Math.max(20, Math.round(pExp * 0.72));
-    const pmax = Math.round(pExp * 1.4);
-    if (pmax >= W) continue;
+    const pmin = Math.max(BENCH_PITCH_MIN, Math.round(pExp * 0.72));
+    const pmax = Math.min(BENCH_PITCH_MAX, Math.round(pExp * 1.4));
+    if (pmax >= W || pmax < pmin) continue;
     let seedLag = pmin,
       seedA = 0;
     for (let L = pmin; L <= pmax; L++) {
@@ -228,52 +312,62 @@ function findBenchBar(buf, W, H) {
         seedLag = L;
       }
     }
-    // Matched comb filter selects the band + pitch (rewards the 11-tooth bench
-    // structure over any other periodic strip). Phase (x0) is refined below.
-    for (let p = Math.max(20, seedLag - 3); p <= seedLag + 3; p++) {
-      const xmax = W - 1 - (TEETH - 1) * p;
+    let bp = seedLag,
+      be = -1;
+    for (
+      let p = Math.max(BENCH_PITCH_MIN, seedLag - 3);
+      p <= Math.min(BENCH_PITCH_MAX, seedLag + 3);
+      p++
+    ) {
+      const xmax = W - 1 - (BENCH_TEETH - 1) * p;
+      let peakE = 0;
       for (let x0 = 0; x0 <= xmax; x0++) {
         let e = 0;
-        for (let k = 0; k < TEETH; k++) e += C[Math.round(x0 + k * p)];
-        if (!best || e > best.comb) best = { yt, yb, bh, pitch: p, comb: e };
+        for (let k = 0; k < BENCH_TEETH; k++) e += C[Math.round(x0 + k * p)];
+        if (e > peakE) peakE = e;
+      }
+      if (peakE > be) {
+        be = peakE;
+        bp = p;
       }
     }
+    cands.push({ yt, yb, pitch: bp, score: be / bh }); // per-row periodicity
   }
-  if (!best) return null;
-  const { yt, yb, pitch } = best;
-  // Phase: anchor on the most colorful icon window, then walk left to slot 0.
-  const V = smooth1d(colSatProfile(buf, W, yt, yb), 2);
-  const win = Math.max(3, Math.round(pitch * 0.7));
-  const Bx = boxSum1d(V, win);
-  let Xc = win,
-    bmax = 0;
-  for (let x = 0; x < W; x++)
-    if (Bx[x] > bmax) {
-      bmax = Bx[x];
-      Xc = x;
-    }
-  const fillThr = bmax * 0.45;
-  let leftC = Xc;
-  while (leftC - pitch >= win && Bx[Math.round(leftC - pitch)] > fillThr)
-    leftC -= pitch;
-  const x0 = Math.round(leftC - pitch / 2);
-  const cy = (yt + yb) / 2;
-  const size = Math.round(pitch * ICON_TO_PITCH);
-  const slots = [];
-  for (let i = 0; i < 10; i++)
-    slots.push({ cx: x0 + pitch * (i + 0.5), cy, size });
-  return {
-    pitch,
-    size,
-    slots,
-    bandH: yb - yt + 1,
-    cy,
-    yt,
-    yb,
-    xLeft: x0,
-    xRight: x0 + 10 * pitch,
-    center: x0 + 5 * pitch,
-  };
+  cands.sort((a, b) => b.score - a.score);
+  // Verify candidates strongest-first; the first with a champion run is the bench.
+  for (let i = 0; i < cands.length && i < 6; i++) {
+    const { yt, yb, pitch } = cands[i];
+    const size = Math.round(pitch * ICON_TO_PITCH);
+    const phase = benchPhaseByContent(
+      buf,
+      W,
+      H,
+      yt,
+      yb,
+      pitch,
+      size,
+      iconHashById,
+    );
+    if (!phase) continue;
+    const x0 = phase.x0;
+    const cy = (yt + yb) / 2;
+    const slots = [];
+    for (let k = 0; k < 10; k++)
+      slots.push({ cx: x0 + pitch * (k + 0.5), cy, size });
+    return {
+      pitch,
+      size,
+      slots,
+      bandH: yb - yt + 1,
+      cy,
+      yt,
+      yb,
+      xLeft: x0,
+      xRight: x0 + 10 * pitch,
+      center: x0 + 5 * pitch,
+    };
+  }
+  return null;
 }
 
 // Reconstruct the champ-select client rectangle from the bench geometry.
@@ -299,8 +393,8 @@ function circleRegionFromBench(bench, W, H) {
 }
 
 // One-shot locate: bench + circle region + client rect. Returns null if no bench.
-function locateLayout(buf, W, H) {
-  const bench = findBenchBar(buf, W, H);
+function locateLayout(buf, W, H, iconHashById) {
+  const bench = findBenchBar(buf, W, H, iconHashById);
   if (!bench) return null;
   const circleRegion = circleRegionFromBench(bench, W, H);
   return { bench, circleRegion, client: circleRegion.client };
@@ -429,8 +523,8 @@ function detectTeamCirclesIn(buf, W, H, region) {
 }
 
 // Locate the team circles by first finding the bench, then the region below it.
-function detectTeamCircles(buf, W, H) {
-  const bench = findBenchBar(buf, W, H);
+function detectTeamCircles(buf, W, H, iconHashById) {
+  const bench = findBenchBar(buf, W, H, iconHashById);
   if (!bench) return null;
   return detectTeamCirclesIn(buf, W, H, circleRegionFromBench(bench, W, H));
 }

@@ -126,18 +126,8 @@ async function runScanFromImage(img, setStatus) {
   ctx.drawImage(img, 0, 0);
   const buf = ctx.getImageData(0, 0, w, h).data;
 
-  // Locate the champ-select layout anywhere in the frame (works on a full-desktop
-  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
-  const layout = locateLayout(buf, w, h);
-  if (!layout) {
-    setStatus(
-      "Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.",
-      true,
-    );
-    return;
-  }
-  const { bench, circleRegion } = layout;
-
+  // The locate stage matches against champion icons to find the client by content,
+  // so the hash database must be ready first.
   setStatus("Preparing champion database…");
   await ensureIconHashes((d, t) =>
     setStatus(`Preparing champion database… ${d}/${t}`),
@@ -146,6 +136,19 @@ async function runScanFromImage(img, setStatus) {
     setStatus("Couldn't load champion icons (offline?).", true);
     return;
   }
+
+  // Locate the champ-select layout anywhere in the frame (works on a full-desktop
+  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
+  setStatus("Finding the League window…");
+  const layout = locateLayout(buf, w, h, iconHashes.byId);
+  if (!layout) {
+    setStatus(
+      "Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.",
+      true,
+    );
+    return;
+  }
+  const { bench, circleRegion } = layout;
 
   setStatus("Identifying champions…");
   const ids = [];

@@ -494,7 +494,7 @@
         const buf = ctx.getImageData(0, 0, W, H).data;
 
         // Stage 0: locate the client / bench / circles anywhere in the frame.
-        const layout = locateLayout(buf, W, H);
+        const layout = locateLayout(buf, W, H, iconHashById);
         if (!layout) {
           setStatus("Couldn't find the bench row in this image.", true);
           return;

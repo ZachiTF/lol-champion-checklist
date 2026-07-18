@@ -39,7 +39,7 @@ const png = PNG.sync.read(fs.readFileSync(path.join(FIX, "aram-bench.png")));
 const { width: W, height: H, data: buf } = png;
 
 // Run the pipeline once; reuse across tests.
-const bench = core.findBenchBar(buf, W, H);
+const bench = core.findBenchBar(buf, W, H, iconHashById);
 const results = bench.slots.map((slot) => {
   const m = core.matchSlot(buf, W, H, slot, iconHashById);
   return { m, verdict: core.classifyMatch(m) };
@@ -102,7 +102,7 @@ test("empty slots sit far from any champion in color space", () => {
 });
 
 // ---- team-pick circles (the 5 locked champions down the left) ----
-const circles = core.detectTeamCircles(buf, W, H);
+const circles = core.detectTeamCircles(buf, W, H, iconHashById);
 const circleResults = (circles || []).map((c) => {
   const m = core.matchCircle(buf, W, H, c, iconHashById);
   return { m, verdict: core.classifyCircleMatch(m) };
@@ -166,7 +166,7 @@ function embed(src, sw, sh, CW, CH, ox, oy, scale) {
 }
 
 function detectAll(b, w, h) {
-  const bench = core.findBenchBar(b, w, h);
+  const bench = core.findBenchBar(b, w, h, iconHashById);
   if (!bench) return null;
   const benchIds = [];
   for (const slot of bench.slots) {
@@ -174,7 +174,7 @@ function detectAll(b, w, h) {
     if (core.classifyMatch(m) !== "reject" && !benchIds.includes(m.id))
       benchIds.push(m.id);
   }
-  const circ = core.detectTeamCircles(b, w, h) || [];
+  const circ = core.detectTeamCircles(b, w, h, iconHashById) || [];
   const circleIds2 = [];
   for (const c of circ) {
     const m = core.matchCircle(b, w, h, c, iconHashById);
@@ -236,4 +236,33 @@ test("fixture 2: locates the bench and its six filled champions", () => {
 
 test("fixture 2: identifies all five team-pick champions", () => {
   assert.deepEqual(r2.circleIds, EXPECTED_2_CIRCLES);
+});
+
+// ---- windowed client on a busy desktop (browser chrome + high-contrast UI) ----
+// Reproduces the real failure: a full-screen print where the League client is a
+// window and other UI has FAR higher edge energy than the bench. The old locator
+// gated candidate bands on the global-max edge energy, so the bench was hidden and
+// nothing was found. Paint a high-contrast distractor band stronger than the bench
+// and assert the bench is still located (by periodicity + champion content).
+test("locates the bench under a higher-contrast distractor (browser chrome)", () => {
+  const CW = 1900,
+    CH = 1200,
+    ox = 340,
+    oy = 520;
+  const b = embed(buf, W, H, CW, CH, ox, oy, 1.0);
+  // a dense vertical-stripe band (like tab/URL text) with much higher edge energy
+  for (let y = 60; y < 96; y++)
+    for (let x = 0; x < CW; x++) {
+      const i = (y * CW + x) * 4;
+      const v = x % 4 < 2 ? 15 : 240;
+      b[i] = b[i + 1] = b[i + 2] = v;
+      b[i + 3] = 255;
+    }
+  const r = detectAll(b, CW, CH);
+  assert.ok(
+    r,
+    "bench should still be located under a high-contrast distractor",
+  );
+  assert.deepEqual(r.benchIds, EXPECTED);
+  assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
 });

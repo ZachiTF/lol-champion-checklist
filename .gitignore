@@ -5,3 +5,4 @@ config.local.js
 .DS_Store
 test-history-import.json
 scratch-*.png
+test_data
