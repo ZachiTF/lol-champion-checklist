@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "Track your progress on League of Legends champions",
   "scripts": {
-    "update-data": "node scripts/update-champion-data.js"
+    "update-data": "node scripts/update-champion-data.js",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
   },
   "repository": {
     "type": "git",

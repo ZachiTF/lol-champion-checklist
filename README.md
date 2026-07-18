@@ -107,9 +107,14 @@ to the committed snapshot. See `data/README.md` for details.
 
 ## Repo structure
 
-- `index.html` — app shell
-- `script.js` — main app logic
+- `index.html` — app shell (loads the `src/` scripts in order)
+- `src/` — app logic, split by concern (classic scripts sharing globals, no build step):
+  - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested)
+  - `scan-ui.js` — scan overlay, paste/drop, icon hashing, the "Available now" group
+  - `state.js` · `champions.js` · `render.js` · `history.js` · `riot-api.js` · `main.js`
 - `style.css` — styling
+- `scan-debug.html` — interactive debugger for the screenshot-scan pipeline
+- `test/` — `node:test` regression tests + fixtures (run with `npm test`)
 - `data/` — generated filter files
 - `scripts/` — data generation scripts
 - `vendor/` — vendored third-party libraries (canvas-confetti; the jsdelivr

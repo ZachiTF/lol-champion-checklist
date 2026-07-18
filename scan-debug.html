@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Champion Scan — Pipeline Debugger</title>
+    <style>
+      :root {
+        --bg: #0b0e14;
+        --card: #151a23;
+        --line: rgba(200, 155, 60, 0.25);
+        --gold: #c89b3c;
+        --fg: #e6e6e6;
+        --muted: rgba(230, 230, 230, 0.55);
+        --accept: #81c784;
+        --maybe: #ffd54f;
+        --reject: #e57373;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        padding: 24px;
+        line-height: 1.5;
+      }
+      h1 { color: var(--gold); margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 20px; }
+      a { color: var(--gold); }
+      .drop {
+        border: 2px dashed var(--line);
+        border-radius: 10px;
+        padding: 28px;
+        text-align: center;
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .drop.dragover { border-color: var(--gold); color: var(--fg); }
+      .drop strong { color: var(--fg); }
+      #status { margin: 12px 0; font-size: 0.9em; color: var(--muted); }
+      #status.error { color: var(--reject); }
+      canvas { max-width: 100%; }
+      .stage { margin-top: 22px; }
+      .stage h2 {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: var(--gold);
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 6px;
+      }
+      .overlay-wrap { overflow-x: auto; background: #000; border-radius: 8px; padding: 8px; }
+      .slots { display: flex; flex-wrap: wrap; gap: 14px; }
+      .slot {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-left-width: 4px;
+        border-radius: 8px;
+        padding: 12px;
+        width: 260px;
+      }
+      .slot.accept { border-left-color: var(--accept); }
+      .slot.maybe { border-left-color: var(--maybe); }
+      .slot.reject { border-left-color: var(--reject); opacity: 0.75; }
+      .slot .verdict { font-weight: 700; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+      .slot.accept .verdict { color: var(--accept); }
+      .slot.maybe .verdict { color: var(--maybe); }
+      .slot.reject .verdict { color: var(--reject); }
+      .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+      .row img, .row canvas { image-rendering: pixelated; border-radius: 4px; background: #000; }
+      .cap { font-size: 0.7em; color: var(--muted); text-align: center; }
+      .metrics { font-size: 0.82em; margin: 6px 0; }
+      .metrics b { color: var(--fg); }
+      table { width: 100%; border-collapse: collapse; font-size: 0.78em; margin-top: 6px; }
+      th, td { text-align: left; padding: 2px 4px; }
+      th { color: var(--muted); font-weight: 500; }
+      tr.win td { color: var(--gold); font-weight: 600; }
+      .swatches { display: grid; grid-template-columns: repeat(3, 16px); gap: 2px; }
+      .swatches div { width: 16px; height: 16px; border-radius: 2px; }
+      .legend { font-size: 0.8em; color: var(--muted); margin-top: 4px; }
+      .legend span { display: inline-block; margin-right: 14px; }
+      .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Champion Scan — Pipeline Debugger</h1>
+    <p class="sub">
+      Drop or paste an ARAM champion-select screenshot to watch each step of
+      <a href="src/scan-core.js">src/scan-core.js</a>: band detection → 10-slot
+      grid → per-slot local search → dHash + color-signature match → verdict.
+    </p>
+
+    <div id="drop" class="drop">
+      <strong>Drop</strong> a screenshot here, <strong>paste</strong> with Ctrl+V,
+      or <input type="file" accept="image/*" id="file" />
+    </div>
+    <div id="status">Loading champion database…</div>
+
+    <div id="out"></div>
+
+    <!-- Pure pipeline math, shared with the app. In the browser its top-level
+         functions become globals we can call directly. -->
+    <script src="src/scan-core.js"></script>
+    <script>
+      const LANG = "en_US";
+      const statusEl = document.getElementById("status");
+      const out = document.getElementById("out");
+      const setStatus = (m, err) => { statusEl.textContent = m; statusEl.classList.toggle("error", !!err); };
+
+      let PATCH = null;
+      let ICON_BASE = null;
+      let iconHashById = null; // Map(id -> { h: BigInt, sig: number[], img: Image })
+
+      function loadImg(url) {
+        return new Promise((res, rej) => {
+          const i = new Image();
+          i.crossOrigin = "anonymous";
+          i.onload = () => res(i);
+          i.onerror = () => rej(new Error("load " + url));
+          i.src = url;
+        });
+      }
+      function imgData(img, w, h) {
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const cx = c.getContext("2d", { willReadFrequently: true });
+        cx.drawImage(img, 0, 0, w, h);
+        return cx.getImageData(0, 0, w, h).data;
+      }
+
+      // Build champion icon hashes live from Data Dragon (cached in localStorage).
+      async function buildHashes() {
+        const versions = await (await fetch("https://ddragon.leagueoflegends.com/api/versions.json")).json();
+        PATCH = versions[0];
+        ICON_BASE = `https://ddragon.leagueoflegends.com/cdn/${PATCH}/img/champion/`;
+        const champs = Object.values(
+          (await (await fetch(`https://ddragon.leagueoflegends.com/cdn/${PATCH}/data/${LANG}/champion.json`)).json()).data,
+        );
+        const map = new Map();
+        let done = 0;
+        const queue = champs.slice();
+        async function worker() {
+          while (queue.length) {
+            const c = queue.shift();
+            try {
+              const img = await loadImg(ICON_BASE + c.image.full);
+              const w = img.naturalWidth, h = img.naturalHeight;
+              const buf = imgData(img, w, h);
+              const hash = dHashRegion(buf, w, h, 0, 0, w, h);
+              const t = Math.round(w * 0.04);
+              const sig = colorSigRegion(buf, w, h, t, t, w - 2 * t, h - 2 * t);
+              map.set(c.id, { h: hash, sig, url: ICON_BASE + c.image.full });
+            } catch (_) {}
+            setStatus(`Building champion database… ${++done}/${champs.length}`);
+          }
+        }
+        await Promise.all(Array.from({ length: 12 }, worker));
+        iconHashById = map;
+        setStatus(`Ready — ${map.size} champions hashed (patch ${PATCH}). Drop a screenshot.`);
+      }
+
+      // Per-slot local search that also returns the top candidates (for display).
+      function debugMatch(buf, W, H, slot) {
+        let best = null;
+        for (const size of [48, 52, 56])
+          for (let dx = -10; dx <= 10; dx += 5)
+            for (let dy = -10; dy <= 10; dy += 5) {
+              const x0 = Math.round(slot.cx - size / 2 + dx);
+              const y0 = Math.round(slot.cy - size / 2 + dy);
+              const h = dHashRegion(buf, W, H, x0, y0, size, size);
+              const t = Math.round(size * 0.04);
+              const sig = colorSigRegion(buf, W, H, x0 + t, y0 + t, size - 2 * t, size - 2 * t);
+              const cands = [];
+              iconHashById.forEach((v, id) => cands.push({ id, ham: hamming64(h, v.h) }));
+              cands.sort((a, b) => a.ham - b.ham);
+              const top = cands.slice(0, 8).map((c) => {
+                const color = colorDist(sig, iconHashById.get(c.id).sig);
+                return { id: c.id, ham: c.ham, color, score: c.ham + color * 0.35 };
+              });
+              top.sort((a, b) => a.score - b.score);
+              if (!best || top[0].score < best.top[0].score)
+                best = { x0, y0, size, h, sig, top };
+            }
+        return best;
+      }
+
+      // ---- rendering helpers ----
+      function cropCanvas(srcCanvas, x, y, w, h, scale) {
+        const c = document.createElement("canvas");
+        c.width = w * scale; c.height = h * scale;
+        const cx = c.getContext("2d");
+        cx.imageSmoothingEnabled = false;
+        cx.drawImage(srcCanvas, x, y, w, h, 0, 0, w * scale, h * scale);
+        return c;
+      }
+      function dHashCanvas(bits) {
+        const c = document.createElement("canvas");
+        c.width = 64; c.height = 64;
+        const cx = c.getContext("2d");
+        let k = 0n;
+        for (let y = 0; y < 8; y++)
+          for (let x = 0; x < 8; x++) {
+            cx.fillStyle = (bits >> k) & 1n ? "#e6e6e6" : "#333";
+            cx.fillRect(x * 8, y * 8, 8, 8);
+            k++;
+          }
+        return c;
+      }
+      function sigSwatches(sig) {
+        const wrap = document.createElement("div");
+        wrap.className = "swatches";
+        for (let i = 0; i < 9; i++) {
+          const d = document.createElement("div");
+          d.style.background = `rgb(${sig[i*3]|0}, ${sig[i*3+1]|0}, ${sig[i*3+2]|0})`;
+          wrap.appendChild(d);
+        }
+        return wrap;
+      }
+
+      function render(img) {
+        out.innerHTML = "";
+        const W = img.naturalWidth, H = img.naturalHeight;
+        const canvas = document.createElement("canvas");
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        const buf = ctx.getImageData(0, 0, W, H).data;
+
+        const bench = detectBenchRow(buf, W, H);
+        if (!bench) { setStatus("Couldn't find the bench row in this image.", true); return; }
+
+        // Stage 1: annotated overlay
+        const stage1 = document.createElement("div");
+        stage1.className = "stage";
+        stage1.innerHTML = `<h2>1 · Detection (bandH ${bench.bandH.toFixed(0)}, ${bench.slots.length} slots)</h2>`;
+        const perSlot = bench.slots.map((s) => ({ slot: s, d: debugMatch(buf, W, H, s) }));
+        const overlay = document.createElement("canvas");
+        overlay.width = W; overlay.height = H;
+        const octx = overlay.getContext("2d");
+        octx.drawImage(canvas, 0, 0);
+        perSlot.forEach(({ d }) => {
+          const v = classifyMatch(d.top[0]);
+          octx.strokeStyle = v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373";
+          octx.lineWidth = 2;
+          octx.strokeRect(d.x0, d.y0, d.size, d.size);
+        });
+        const wrap = document.createElement("div");
+        wrap.className = "overlay-wrap";
+        wrap.appendChild(overlay);
+        stage1.appendChild(wrap);
+        stage1.insertAdjacentHTML("beforeend",
+          `<div class="legend">
+             <span><i class="dot" style="background:#81c784"></i>accept</span>
+             <span><i class="dot" style="background:#ffd54f"></i>maybe (flagged)</span>
+             <span><i class="dot" style="background:#e57373"></i>reject (empty slot)</span>
+           </div>`);
+        out.appendChild(stage1);
+
+        // Stage 2: per-slot breakdown
+        const stage2 = document.createElement("div");
+        stage2.className = "stage";
+        stage2.innerHTML = "<h2>2 · Per-slot match</h2>";
+        const slots = document.createElement("div");
+        slots.className = "slots";
+        perSlot.forEach(({ d }, i) => {
+          const verdict = classifyMatch(d.top[0]);
+          const winner = d.top[0];
+          const el = document.createElement("div");
+          el.className = "slot " + verdict;
+          el.innerHTML = `<div class="verdict">slot ${i} · ${verdict}</div>`;
+
+          const row = document.createElement("div");
+          row.className = "row";
+          const cropWrap = document.createElement("div");
+          cropWrap.appendChild(cropCanvas(canvas, d.x0, d.y0, d.size, d.size, 1.4));
+          cropWrap.insertAdjacentHTML("beforeend", '<div class="cap">screenshot crop</div>');
+          row.appendChild(cropWrap);
+          if (verdict !== "reject") {
+            const iconWrap = document.createElement("div");
+            const im = document.createElement("img");
+            im.width = im.height = Math.round(d.size * 1.4);
+            im.src = iconHashById.get(winner.id).url;
+            iconWrap.appendChild(im);
+            iconWrap.insertAdjacentHTML("beforeend", `<div class="cap">${winner.id}</div>`);
+            row.appendChild(iconWrap);
+          }
+          el.appendChild(row);
+
+          const row2 = document.createElement("div");
+          row2.className = "row";
+          const dh = document.createElement("div");
+          dh.appendChild(dHashCanvas(d.h));
+          dh.insertAdjacentHTML("beforeend", '<div class="cap">dHash 8×8</div>');
+          const cs = document.createElement("div");
+          cs.appendChild(sigSwatches(d.sig));
+          cs.insertAdjacentHTML("beforeend", '<div class="cap">color 3×3</div>');
+          row2.appendChild(dh); row2.appendChild(cs);
+          el.appendChild(row2);
+
+          el.insertAdjacentHTML("beforeend",
+            `<div class="metrics">best: <b>${winner.id}</b> · ham <b>${winner.ham}</b> · color <b>${winner.color.toFixed(1)}</b></div>`);
+
+          const table = document.createElement("table");
+          table.innerHTML = "<tr><th>candidate</th><th>ham</th><th>color</th><th>score</th></tr>" +
+            d.top.slice(0, 5).map((c, j) =>
+              `<tr class="${j === 0 ? "win" : ""}"><td>${c.id}</td><td>${c.ham}</td><td>${c.color.toFixed(1)}</td><td>${c.score.toFixed(1)}</td></tr>`).join("");
+          el.appendChild(table);
+          slots.appendChild(el);
+        });
+        stage2.appendChild(slots);
+        out.appendChild(stage2);
+
+        const accepted = perSlot.filter((p) => classifyMatch(p.d.top[0]) !== "reject").map((p) => p.d.top[0].id);
+        setStatus(`Detected ${accepted.length}: ${accepted.join(", ")}`);
+      }
+
+      async function handleFile(file) {
+        if (!file || !file.type.startsWith("image/")) return setStatus("Not an image.", true);
+        if (!iconHashById) return setStatus("Still building the database — one moment.", true);
+        setStatus("Processing…");
+        const url = URL.createObjectURL(file);
+        try { render(await loadImg(url)); } finally { URL.revokeObjectURL(url); }
+      }
+
+      const drop = document.getElementById("drop");
+      document.getElementById("file").addEventListener("change", (e) => handleFile(e.target.files[0]));
+      drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
+      drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault(); drop.classList.remove("dragover");
+        handleFile(e.dataTransfer.files[0]);
+      });
+      document.addEventListener("paste", (e) => {
+        for (const it of e.clipboardData?.items || [])
+          if (it.type.startsWith("image/")) return handleFile(it.getAsFile());
+      });
+
+      buildHashes().catch((e) => setStatus("Failed to load champion database: " + e.message, true));
+    </script>
+  </body>
+</html>
