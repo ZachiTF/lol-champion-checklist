@@ -126,14 +126,17 @@ async function runScanFromImage(img, setStatus) {
   ctx.drawImage(img, 0, 0);
   const buf = ctx.getImageData(0, 0, w, h).data;
 
-  const bench = detectBenchRow(buf, w, h);
-  if (!bench) {
+  // Locate the champ-select layout anywhere in the frame (works on a full-desktop
+  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
+  const layout = locateLayout(buf, w, h);
+  if (!layout) {
     setStatus(
       "Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.",
       true,
     );
     return;
   }
+  const { bench, circleRegion } = layout;
 
   setStatus("Preparing champion database…");
   await ensureIconHashes((d, t) =>
@@ -158,7 +161,7 @@ async function runScanFromImage(img, setStatus) {
     add(m && m.id, classifyMatch(m));
   }
   // Team-pick circles (the 5 locked champions down the left), if visible.
-  const circles = detectTeamCircles(buf, w, h) || [];
+  const circles = detectTeamCirclesIn(buf, w, h, circleRegion) || [];
   for (const circle of circles) {
     const m = matchCircle(buf, w, h, circle, iconHashes.byId);
     add(m && m.id, classifyCircleMatch(m));

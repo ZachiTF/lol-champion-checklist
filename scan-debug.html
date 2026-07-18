@@ -194,9 +194,11 @@
   <body>
     <h1>Champion Scan — Pipeline Debugger</h1>
     <p class="sub">
-      Drop or paste an ARAM champion-select screenshot to watch each step of
-      <a href="src/scan-core.js">src/scan-core.js</a>: band detection → 10-slot
-      grid → per-slot local search → dHash + color-signature match → verdict.
+      Drop or paste an ARAM champion-select screenshot — a cropped client
+      <em>or a full-desktop print screen</em> — to watch each step of
+      <a href="src/scan-core.js">src/scan-core.js</a>: locate the client/bench/
+      circles anywhere at any scale → 10-slot grid → per-slot local search →
+      dHash + color-signature match → verdict.
     </p>
 
     <div id="drop" class="drop">
@@ -293,11 +295,16 @@
       }
 
       // Per-slot local search that also returns the top candidates (for display).
+      // Size-aware around the detected slot size, mirroring scan-core's matchSlot.
       function debugMatch(buf, W, H, slot) {
         let best = null;
-        for (const size of [48, 52, 56])
-          for (let dx = -10; dx <= 10; dx += 5)
-            for (let dy = -10; dy <= 10; dy += 5) {
+        const s = slot.size || 52;
+        const off = Math.max(6, Math.round(s * 0.22));
+        const step = Math.max(3, Math.round(off / 2));
+        for (const size of [s - 6, s - 3, s, s + 3, s + 6]) {
+          if (size < 16) continue;
+          for (let dx = -off; dx <= off; dx += step)
+            for (let dy = -off; dy <= off; dy += step) {
               const x0 = Math.round(slot.cx - size / 2 + dx);
               const y0 = Math.round(slot.cy - size / 2 + dy);
               const h = dHashRegion(buf, W, H, x0, y0, size, size);
@@ -329,18 +336,23 @@
               if (!best || top[0].score < best.top[0].score)
                 best = { x0, y0, size, h, sig, top };
             }
+        }
         return best;
       }
 
       // Circle variant: inscribed square (no mask) ranked against the icon
-      // center-crop hashes (hC/sigC). Mirrors scan-core's matchCircle search.
+      // center-crop hashes (hC/sigC). Mirrors scan-core's size-aware matchCircle.
       function debugMatchCircle(buf, W, H, circle) {
         let best = null;
         const s = circle.size;
-        for (const size of [s - 8, s - 4, s, s + 4, s + 8]) {
-          if (size < 20) continue;
-          for (let dx = -9; dx <= 9; dx += 3)
-            for (let dy = -9; dy <= 9; dy += 3) {
+        const f = s / 48;
+        const off = Math.max(9, Math.round(9 * f));
+        const step = Math.max(3, Math.round(3 * f));
+        const ds = Math.max(4, Math.round(4 * f));
+        for (const size of [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds]) {
+          if (size < 16) continue;
+          for (let dx = -off; dx <= off; dx += step)
+            for (let dy = -off; dy <= off; dy += step) {
               const x0 = Math.round(circle.cx - size / 2 + dx);
               const y0 = Math.round(circle.cy - size / 2 + dy);
               const h = dHashRegion(buf, W, H, x0, y0, size, size);
@@ -481,11 +493,70 @@
         ctx.drawImage(img, 0, 0);
         const buf = ctx.getImageData(0, 0, W, H).data;
 
-        const bench = detectBenchRow(buf, W, H);
-        if (!bench) {
+        // Stage 0: locate the client / bench / circles anywhere in the frame.
+        const layout = locateLayout(buf, W, H);
+        if (!layout) {
           setStatus("Couldn't find the bench row in this image.", true);
           return;
         }
+        const { bench, circleRegion, client } = layout;
+
+        const stage0 = document.createElement("div");
+        stage0.className = "stage";
+        stage0.innerHTML = `<h2>0 · Locate (client ${Math.round(
+          client.w,
+        )}×${Math.round(client.h)}, pitch ${bench.pitch})</h2>`;
+        const loc = document.createElement("canvas");
+        loc.width = W;
+        loc.height = H;
+        const lctx = loc.getContext("2d");
+        lctx.drawImage(canvas, 0, 0);
+        // reconstructed client rectangle (dashed gold)
+        lctx.lineWidth = Math.max(2, Math.round(W / 500));
+        lctx.setLineDash([10, 6]);
+        lctx.strokeStyle = "#c89b3c";
+        lctx.strokeRect(client.x, client.y, client.w, client.h);
+        // bench band + horizontal extent (solid gold)
+        lctx.setLineDash([]);
+        lctx.strokeStyle = "#ffd54f";
+        lctx.strokeRect(
+          bench.xLeft,
+          bench.yt,
+          bench.xRight - bench.xLeft,
+          bench.yb - bench.yt,
+        );
+        lctx.fillStyle = "rgba(255, 213, 79, 0.12)";
+        lctx.fillRect(
+          bench.xLeft,
+          bench.yt,
+          bench.xRight - bench.xLeft,
+          bench.yb - bench.yt,
+        );
+        // team-circle search region (dashed cyan)
+        lctx.setLineDash([8, 5]);
+        lctx.strokeStyle = "#4dd0e1";
+        lctx.strokeRect(
+          circleRegion.xa,
+          circleRegion.y0,
+          circleRegion.xb - circleRegion.xa,
+          circleRegion.y1 - circleRegion.y0,
+        );
+        lctx.setLineDash([]);
+        const wrap0 = document.createElement("div");
+        wrap0.className = "overlay-wrap";
+        wrap0.appendChild(loc);
+        stage0.appendChild(wrap0);
+        stage0.insertAdjacentHTML(
+          "beforeend",
+          `<div class="legend">
+             <span><i class="dot" style="background:#c89b3c"></i>reconstructed client</span>
+             <span><i class="dot" style="background:#ffd54f"></i>bench bar (pitch ${
+               bench.pitch
+             }, center ${Math.round(bench.center)})</span>
+             <span><i class="dot" style="background:#4dd0e1"></i>team-circle search</span>
+           </div>`,
+        );
+        out.appendChild(stage0);
 
         // Stage 1: annotated overlay
         const stage1 = document.createElement("div");
@@ -497,7 +568,9 @@
           slot: s,
           d: debugMatch(buf, W, H, s),
         }));
-        const circles = (detectTeamCircles(buf, W, H) || []).map((c) => ({
+        const circles = (
+          detectTeamCirclesIn(buf, W, H, circleRegion) || []
+        ).map((c) => ({
           c,
           d: debugMatchCircle(buf, W, H, c),
         }));
