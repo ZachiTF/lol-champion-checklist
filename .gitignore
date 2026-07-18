@@ -4,3 +4,4 @@ node_modules/
 config.local.js
 .DS_Store
 test-history-import.json
+scratch-*.png

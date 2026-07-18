@@ -114,6 +114,8 @@
     </div>
     <div id="active-filters" class="active-filters"></div>
 
+    <div id="scan-results" class="scan-results"></div>
+
     <div id="champion-grid"></div>
 
     <div id="history-box" class="history-box">
@@ -132,20 +134,33 @@
          bytes per edge node, which made SRI hashes fail intermittently. -->
     <script src="vendor/canvas-confetti-1.9.3.js"></script>
     <script src="celebrations.js"></script>
+    <!-- Pure scan pipeline math; no app dependencies, so it can load standalone. -->
+    <script src="src/scan-core.js"></script>
     <script>
       window.APP_CONFIG = window.APP_CONFIG || {};
+      // Load the optional local config first, then the app modules in order.
+      // async=false makes dynamically-inserted scripts execute in insertion
+      // order; a missing config.local.js just 404s harmlessly and is skipped.
+      // (Classic scripts share one global scope, so these files see each
+      // other's top-level functions/consts without import/export — and it
+      // still works when opening index.html directly via file://.)
       (function loadApp() {
-        const loadMain = () => {
-          const appScript = document.createElement("script");
-          appScript.src = "script.js";
-          document.body.appendChild(appScript);
-        };
-
-        const localConfigScript = document.createElement("script");
-        localConfigScript.src = "config.local.js";
-        localConfigScript.onload = loadMain;
-        localConfigScript.onerror = loadMain;
-        document.body.appendChild(localConfigScript);
+        const sources = [
+          "config.local.js",
+          "src/riot-api.js",
+          "src/state.js",
+          "src/champions.js",
+          "src/history.js",
+          "src/render.js",
+          "src/scan-ui.js",
+          "src/main.js",
+        ];
+        for (const src of sources) {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = false;
+          document.body.appendChild(s);
+        }
       })();
     </script>
   </body>
