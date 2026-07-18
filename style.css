@@ -45,6 +45,117 @@
   min-width: 250px;
 }
 
+/* Features & guide panel (collapsible, near the top) */
+.features-panel {
+  max-width: 900px;
+  margin: 0 auto 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.features-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--fg);
+  user-select: none;
+}
+.features-summary::-webkit-details-marker {
+  display: none;
+}
+.features-summary::before {
+  content: "▸";
+  color: #c89b3c;
+  transition: transform 0.15s ease;
+}
+.features-panel[open] .features-summary::before {
+  transform: rotate(90deg);
+}
+.features-summary:hover {
+  background: var(--card-hover);
+}
+.features-new-dot {
+  font-size: 0.7em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #7a4c00;
+  background: #ffcf6b;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.features-body {
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--hairline);
+}
+.features-guide {
+  margin: 12px 0 16px;
+  padding-left: 20px;
+  color: var(--muted-fg);
+  font-size: 0.9em;
+  line-height: 1.6;
+}
+.features-guide li {
+  margin: 3px 0;
+}
+.features-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px 20px;
+}
+.features-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.features-icon {
+  font-size: 1.1em;
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
+.features-text {
+  display: flex;
+  flex-direction: column;
+  color: var(--fg);
+  font-size: 0.9em;
+}
+.features-desc {
+  color: var(--muted-fg);
+  font-size: 0.95em;
+  margin-top: 1px;
+}
+.features-sub {
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0 0 0 10px;
+  border-left: 2px solid var(--hairline);
+}
+.features-sub li {
+  font-size: 0.92em;
+  margin: 2px 0;
+}
+.features-sub .features-desc {
+  display: inline;
+}
+.features-tag {
+  font-size: 0.65em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #7a4c00;
+  background: #ffcf6b;
+  border-radius: 999px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
 .wip-notice {
   background: #ffe7b3;
   color: #7a4c00;
