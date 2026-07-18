@@ -138,13 +138,126 @@ function classifyMatch(m) {
   return "reject";
 }
 
+// ---- team-pick circles (the 5 circular portraits down the left) ----
+// These are your team's locked-in champions. Circular art differs more from the
+// square icon than the bench squares do, so: match a clean inscribed square (no
+// mask — a circular mask's boundary would swamp the hash for dark portraits)
+// against a center-crop of each icon (CIRCLE_ICON_FRAC), with looser thresholds.
+const CIRCLE_ICON_FRAC = 0.72; // central fraction of the icon a circle maps to
+const CIRCLE_ACCEPT_COLOR = 28; // circle matches run higher than bench squares
+const CIRCLE_ACCEPT_HAM = 20;
+const CIRCLE_MAYBE_COLOR = 46;
+const CIRCLE_MAYBE_HAM = 26;
+
+// The center-crop rect of a square icon that a team circle should be matched to.
+function circleIconRect(size) {
+  const t = Math.round((size * (1 - CIRCLE_ICON_FRAC)) / 2);
+  return { x: t, y: t, w: size - 2 * t, h: size - 2 * t };
+}
+
+// Locate the vertical column of 5 team-pick circles on the left. Returns
+// [{ cx, cy, size }] (size = the inscribed-square side to sample), or null.
+function detectTeamCircles(buf, W, H) {
+  const xa = Math.round(W * 0.035), xb = Math.round(W * 0.095);
+  const y0 = Math.round(H * 0.12), y1 = Math.round(H * 0.7);
+  const raw = [];
+  for (let y = y0; y < y1; y++) {
+    let s = 0;
+    for (let x = xa; x < xb; x++) {
+      const i = (y * W + x) * 4;
+      const sat = Math.max(buf[i], buf[i + 1], buf[i + 2]) - Math.min(buf[i], buf[i + 1], buf[i + 2]);
+      s += sat + 0.3 * Math.abs(pxLum(buf, W, x, y) - pxLum(buf, W, x - 1, y));
+    }
+    raw.push(s / (xb - xa));
+  }
+  // smooth (±4) then find local maxima
+  const sm = raw.map((_, i) => {
+    let a = 0, n = 0;
+    for (let k = -4; k <= 4; k++) { const j = i + k; if (j >= 0 && j < raw.length) { a += raw[j]; n++; } }
+    return a / n;
+  });
+  const peaks = [];
+  for (let i = 1; i < sm.length - 1; i++) if (sm[i] >= sm[i - 1] && sm[i] > sm[i + 1]) peaks.push({ y: y0 + i, s: sm[i] });
+  // greedy: strongest first, keep 5 that are >= minSep apart
+  const minSep = Math.round((y1 - y0) / 8);
+  peaks.sort((a, b) => b.s - a.s);
+  const chosen = [];
+  for (const p of peaks) {
+    if (p.s < 8) break;
+    if (chosen.every((c) => Math.abs(c.y - p.y) >= minSep)) chosen.push(p);
+    if (chosen.length === 5) break;
+  }
+  if (chosen.length < 3) return null;
+  chosen.sort((a, b) => a.y - b.y);
+  // median spacing → circle size; centroid of saturation → column center
+  let spacing = H * 0.115;
+  if (chosen.length >= 2) {
+    const d = [];
+    for (let i = 1; i < chosen.length; i++) d.push(chosen[i].y - chosen[i - 1].y);
+    d.sort((a, b) => a - b);
+    spacing = d[Math.floor(d.length / 2)];
+  }
+  const size = Math.round(spacing * 0.56);
+  let cxNum = 0, cxDen = 0;
+  const cxa = Math.round(W * 0.03), cxb = Math.round(W * 0.1);
+  for (const c of chosen) {
+    for (let x = cxa; x < cxb; x++) {
+      const i = (c.y * W + x) * 4;
+      const sat = Math.max(buf[i], buf[i + 1], buf[i + 2]) - Math.min(buf[i], buf[i + 1], buf[i + 2]);
+      cxNum += x * sat; cxDen += sat;
+    }
+  }
+  const cx = cxDen ? Math.round(cxNum / cxDen) : Math.round(W * 0.064);
+  return chosen.map((c) => ({ cx, cy: c.y, size }));
+}
+
+// Match one team circle: search offsets/sizes around its inscribed square and
+// rank against the icons' center-crop hashes (iconHashById entries carry hC/sigC).
+function matchCircle(buf, W, H, circle, iconHashById) {
+  let best = null;
+  const s = circle.size;
+  for (const size of [s - 8, s - 4, s, s + 4, s + 8]) {
+    if (size < 20) continue;
+    for (let dx = -9; dx <= 9; dx += 3) {
+      for (let dy = -9; dy <= 9; dy += 3) {
+        const x0 = Math.round(circle.cx - size / 2 + dx);
+        const y0 = Math.round(circle.cy - size / 2 + dy);
+        const h = dHashRegion(buf, W, H, x0, y0, size, size);
+        const cands = [];
+        iconHashById.forEach((v, id) => cands.push({ id, d: hamming64(h, v.hC) }));
+        cands.sort((a, b) => a.d - b.d);
+        const sig = colorSigRegion(buf, W, H, x0, y0, size, size);
+        for (let i = 0; i < 8 && i < cands.length; i++) {
+          const id = cands[i].id;
+          const c = colorDist(sig, iconHashById.get(id).sigC);
+          const score = cands[i].d + c * 0.35;
+          if (!best || score < best.score) best = { id, ham: cands[i].d, color: c, score };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// Team circles are always real champions (a full ARAM team is 5), so there is no
+// "empty" case — only accept vs uncertain (flagged) vs reject (detection junk).
+function classifyCircleMatch(m) {
+  if (!m) return "reject";
+  if (m.color <= CIRCLE_ACCEPT_COLOR && m.ham <= CIRCLE_ACCEPT_HAM) return "accept";
+  if (m.color <= CIRCLE_MAYBE_COLOR && m.ham <= CIRCLE_MAYBE_HAM) return "maybe";
+  return "reject";
+}
+
 // Dual-use: expose the pure API to Node (tests) without disturbing the browser,
 // where these top-level declarations are already globals shared across scripts.
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     pxLum, dHashRegion, colorSigRegion, hamming64, colorDist,
     detectBenchRow, matchSlot, classifyMatch,
+    detectTeamCircles, matchCircle, classifyCircleMatch, circleIconRect,
     SCAN_ACCEPT_COLOR, SCAN_ACCEPT_HAM, SCAN_MAYBE_COLOR, SCAN_MAYBE_HAM,
+    CIRCLE_ICON_FRAC, CIRCLE_ACCEPT_COLOR, CIRCLE_ACCEPT_HAM,
+    CIRCLE_MAYBE_COLOR, CIRCLE_MAYBE_HAM,
   };
 }
 

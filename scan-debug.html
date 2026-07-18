@@ -150,7 +150,10 @@
               const hash = dHashRegion(buf, w, h, 0, 0, w, h);
               const t = Math.round(w * 0.04);
               const sig = colorSigRegion(buf, w, h, t, t, w - 2 * t, h - 2 * t);
-              map.set(c.id, { h: hash, sig, url: ICON_BASE + c.image.full });
+              const r = circleIconRect(w); // center-crop variant for team circles
+              const hC = dHashRegion(buf, w, h, r.x, r.y, r.w, r.h);
+              const sigC = colorSigRegion(buf, w, h, r.x, r.y, r.w, r.h);
+              map.set(c.id, { h: hash, sig, hC, sigC, url: ICON_BASE + c.image.full });
             } catch (_) {}
             setStatus(`Building champion database… ${++done}/${champs.length}`);
           }
@@ -185,7 +188,77 @@
         return best;
       }
 
+      // Circle variant: inscribed square (no mask) ranked against the icon
+      // center-crop hashes (hC/sigC). Mirrors scan-core's matchCircle search.
+      function debugMatchCircle(buf, W, H, circle) {
+        let best = null;
+        const s = circle.size;
+        for (const size of [s - 8, s - 4, s, s + 4, s + 8]) {
+          if (size < 20) continue;
+          for (let dx = -9; dx <= 9; dx += 3)
+            for (let dy = -9; dy <= 9; dy += 3) {
+              const x0 = Math.round(circle.cx - size / 2 + dx);
+              const y0 = Math.round(circle.cy - size / 2 + dy);
+              const h = dHashRegion(buf, W, H, x0, y0, size, size);
+              const sig = colorSigRegion(buf, W, H, x0, y0, size, size);
+              const cands = [];
+              iconHashById.forEach((v, id) => cands.push({ id, ham: hamming64(h, v.hC) }));
+              cands.sort((a, b) => a.ham - b.ham);
+              const top = cands.slice(0, 8).map((c) => {
+                const color = colorDist(sig, iconHashById.get(c.id).sigC);
+                return { id: c.id, ham: c.ham, color, score: c.ham + color * 0.35 };
+              });
+              top.sort((a, b) => a.score - b.score);
+              if (!best || top[0].score < best.top[0].score) best = { x0, y0, size, h, sig, top };
+            }
+        }
+        return best;
+      }
+
       // ---- rendering helpers ----
+      // One breakdown card for a matched crop (shared by bench slots + circles).
+      function matchCard(canvas, d, label, verdict) {
+        const winner = d.top[0];
+        const el = document.createElement("div");
+        el.className = "slot " + verdict;
+        el.innerHTML = `<div class="verdict">${label} · ${verdict}</div>`;
+        const row = document.createElement("div");
+        row.className = "row";
+        const cropWrap = document.createElement("div");
+        cropWrap.appendChild(cropCanvas(canvas, d.x0, d.y0, d.size, d.size, 1.4));
+        cropWrap.insertAdjacentHTML("beforeend", '<div class="cap">screenshot crop</div>');
+        row.appendChild(cropWrap);
+        if (verdict !== "reject") {
+          const iconWrap = document.createElement("div");
+          const im = document.createElement("img");
+          im.width = im.height = Math.round(d.size * 1.4);
+          im.src = iconHashById.get(winner.id).url;
+          iconWrap.appendChild(im);
+          iconWrap.insertAdjacentHTML("beforeend", `<div class="cap">${winner.id}</div>`);
+          row.appendChild(iconWrap);
+        }
+        el.appendChild(row);
+        const row2 = document.createElement("div");
+        row2.className = "row";
+        const dh = document.createElement("div");
+        dh.appendChild(dHashCanvas(d.h));
+        dh.insertAdjacentHTML("beforeend", '<div class="cap">dHash 8×8</div>');
+        const cs = document.createElement("div");
+        cs.appendChild(sigSwatches(d.sig));
+        cs.insertAdjacentHTML("beforeend", '<div class="cap">color 3×3</div>');
+        row2.appendChild(dh); row2.appendChild(cs);
+        el.appendChild(row2);
+        el.insertAdjacentHTML("beforeend",
+          `<div class="metrics">best: <b>${winner.id}</b> · ham <b>${winner.ham}</b> · color <b>${winner.color.toFixed(1)}</b></div>`);
+        const table = document.createElement("table");
+        table.innerHTML = "<tr><th>candidate</th><th>ham</th><th>color</th><th>score</th></tr>" +
+          d.top.slice(0, 5).map((c, j) =>
+            `<tr class="${j === 0 ? "win" : ""}"><td>${c.id}</td><td>${c.ham}</td><td>${c.color.toFixed(1)}</td><td>${c.score.toFixed(1)}</td></tr>`).join("");
+        el.appendChild(table);
+        return el;
+      }
+
+      // ---- low-level rendering helpers ----
       function cropCanvas(srcCanvas, x, y, w, h, scale) {
         const c = document.createElement("canvas");
         c.width = w * scale; c.height = h * scale;
@@ -235,15 +308,22 @@
         stage1.className = "stage";
         stage1.innerHTML = `<h2>1 · Detection (bandH ${bench.bandH.toFixed(0)}, ${bench.slots.length} slots)</h2>`;
         const perSlot = bench.slots.map((s) => ({ slot: s, d: debugMatch(buf, W, H, s) }));
+        const circles = (detectTeamCircles(buf, W, H) || []).map((c) => ({ c, d: debugMatchCircle(buf, W, H, c) }));
+        const vColor = (v) => (v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373");
         const overlay = document.createElement("canvas");
         overlay.width = W; overlay.height = H;
         const octx = overlay.getContext("2d");
         octx.drawImage(canvas, 0, 0);
+        octx.lineWidth = 2;
         perSlot.forEach(({ d }) => {
-          const v = classifyMatch(d.top[0]);
-          octx.strokeStyle = v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373";
-          octx.lineWidth = 2;
+          octx.strokeStyle = vColor(classifyMatch(d.top[0]));
           octx.strokeRect(d.x0, d.y0, d.size, d.size);
+        });
+        circles.forEach(({ c, d }) => {
+          octx.strokeStyle = vColor(classifyCircleMatch(d.top[0]));
+          octx.beginPath();
+          octx.arc(c.cx, c.cy, c.size * 0.72, 0, Math.PI * 2);
+          octx.stroke();
         });
         const wrap = document.createElement("div");
         wrap.className = "overlay-wrap";
@@ -264,55 +344,29 @@
         const slots = document.createElement("div");
         slots.className = "slots";
         perSlot.forEach(({ d }, i) => {
-          const verdict = classifyMatch(d.top[0]);
-          const winner = d.top[0];
-          const el = document.createElement("div");
-          el.className = "slot " + verdict;
-          el.innerHTML = `<div class="verdict">slot ${i} · ${verdict}</div>`;
-
-          const row = document.createElement("div");
-          row.className = "row";
-          const cropWrap = document.createElement("div");
-          cropWrap.appendChild(cropCanvas(canvas, d.x0, d.y0, d.size, d.size, 1.4));
-          cropWrap.insertAdjacentHTML("beforeend", '<div class="cap">screenshot crop</div>');
-          row.appendChild(cropWrap);
-          if (verdict !== "reject") {
-            const iconWrap = document.createElement("div");
-            const im = document.createElement("img");
-            im.width = im.height = Math.round(d.size * 1.4);
-            im.src = iconHashById.get(winner.id).url;
-            iconWrap.appendChild(im);
-            iconWrap.insertAdjacentHTML("beforeend", `<div class="cap">${winner.id}</div>`);
-            row.appendChild(iconWrap);
-          }
-          el.appendChild(row);
-
-          const row2 = document.createElement("div");
-          row2.className = "row";
-          const dh = document.createElement("div");
-          dh.appendChild(dHashCanvas(d.h));
-          dh.insertAdjacentHTML("beforeend", '<div class="cap">dHash 8×8</div>');
-          const cs = document.createElement("div");
-          cs.appendChild(sigSwatches(d.sig));
-          cs.insertAdjacentHTML("beforeend", '<div class="cap">color 3×3</div>');
-          row2.appendChild(dh); row2.appendChild(cs);
-          el.appendChild(row2);
-
-          el.insertAdjacentHTML("beforeend",
-            `<div class="metrics">best: <b>${winner.id}</b> · ham <b>${winner.ham}</b> · color <b>${winner.color.toFixed(1)}</b></div>`);
-
-          const table = document.createElement("table");
-          table.innerHTML = "<tr><th>candidate</th><th>ham</th><th>color</th><th>score</th></tr>" +
-            d.top.slice(0, 5).map((c, j) =>
-              `<tr class="${j === 0 ? "win" : ""}"><td>${c.id}</td><td>${c.ham}</td><td>${c.color.toFixed(1)}</td><td>${c.score.toFixed(1)}</td></tr>`).join("");
-          el.appendChild(table);
-          slots.appendChild(el);
+          slots.appendChild(matchCard(canvas, d, `slot ${i}`, classifyMatch(d.top[0])));
         });
         stage2.appendChild(slots);
         out.appendChild(stage2);
 
-        const accepted = perSlot.filter((p) => classifyMatch(p.d.top[0]) !== "reject").map((p) => p.d.top[0].id);
-        setStatus(`Detected ${accepted.length}: ${accepted.join(", ")}`);
+        // Stage 3: team-pick circles
+        if (circles.length) {
+          const stage3 = document.createElement("div");
+          stage3.className = "stage";
+          stage3.innerHTML = `<h2>3 · Team-pick circles (${circles.length})</h2>`;
+          const wrap3 = document.createElement("div");
+          wrap3.className = "slots";
+          circles.forEach(({ d }, i) => {
+            wrap3.appendChild(matchCard(canvas, d, `circle ${i}`, classifyCircleMatch(d.top[0])));
+          });
+          stage3.appendChild(wrap3);
+          out.appendChild(stage3);
+        }
+
+        const benchIds = perSlot.filter((p) => classifyMatch(p.d.top[0]) !== "reject").map((p) => p.d.top[0].id);
+        const circleIds = circles.filter((p) => classifyCircleMatch(p.d.top[0]) !== "reject").map((p) => p.d.top[0].id);
+        const all = [...new Set([...benchIds, ...circleIds])];
+        setStatus(`Detected ${all.length} (bench ${benchIds.length} + circles ${circleIds.length}): ${all.join(", ")}`);
       }
 
       async function handleFile(file) {

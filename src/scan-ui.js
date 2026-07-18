@@ -31,13 +31,18 @@ function loadCrossOriginImage(url) {
 }
 
 // Build (or restore from localStorage) a hash per champion icon. Cached by patch.
+const ICON_HASH_VERSION = 2; // bump when the stored hash shape changes (added hC/sigC)
+
 async function ensureIconHashes(onProgress) {
   if (iconHashes && iconHashes.patch === PATCH) return iconHashes;
   try {
     const raw = JSON.parse(localStorage.getItem(ICON_HASH_STORE) || "null");
-    if (raw && raw.patch === PATCH && Array.isArray(raw.items)) {
+    if (raw && raw.v === ICON_HASH_VERSION && raw.patch === PATCH && Array.isArray(raw.items)) {
       const byId = new Map(
-        raw.items.map((it) => [it.id, { h: BigInt("0x" + it.h), sig: it.sig }]),
+        raw.items.map((it) => [it.id, {
+          h: BigInt("0x" + it.h), sig: it.sig,
+          hC: BigInt("0x" + it.hC), sigC: it.sigC,
+        }]),
       );
       iconHashes = { patch: PATCH, byId };
       return iconHashes;
@@ -60,11 +65,19 @@ async function ensureIconHashes(onProgress) {
         canvas.width = w; canvas.height = h;
         ctx.drawImage(img, 0, 0);
         const buf = ctx.getImageData(0, 0, w, h).data;
+        // Bench squares match the full icon; team circles match a center-crop.
         const hash = dHashRegion(buf, w, h, 0, 0, w, h);
         const t = Math.round(w * 0.04);
         const sig = colorSigRegion(buf, w, h, t, t, w - 2 * t, h - 2 * t);
-        byId.set(champ.id, { h: hash, sig });
-        items.push({ id: champ.id, h: hash.toString(16).padStart(16, "0"), sig });
+        const r = circleIconRect(w);
+        const hashC = dHashRegion(buf, w, h, r.x, r.y, r.w, r.h);
+        const sigC = colorSigRegion(buf, w, h, r.x, r.y, r.w, r.h);
+        byId.set(champ.id, { h: hash, sig, hC: hashC, sigC });
+        items.push({
+          id: champ.id,
+          h: hash.toString(16).padStart(16, "0"), sig,
+          hC: hashC.toString(16).padStart(16, "0"), sigC,
+        });
       } catch (_) {
         /* skip an icon that fails to load; matching just won't offer it */
       }
@@ -75,7 +88,7 @@ async function ensureIconHashes(onProgress) {
   await Promise.all(Array.from({ length: CONC }, worker));
   iconHashes = { patch: PATCH, byId };
   try {
-    localStorage.setItem(ICON_HASH_STORE, JSON.stringify({ patch: PATCH, items }));
+    localStorage.setItem(ICON_HASH_STORE, JSON.stringify({ v: ICON_HASH_VERSION, patch: PATCH, items }));
   } catch (_) {}
   return iconHashes;
 }
@@ -103,13 +116,21 @@ async function runScanFromImage(img, setStatus) {
   setStatus("Identifying champions…");
   const ids = [];
   const uncertain = new Set();
+  const add = (id, verdict) => {
+    if (verdict === "reject" || ids.includes(id)) return;
+    ids.push(id);
+    if (verdict === "maybe") uncertain.add(id);
+  };
+  // Bench squares (up to 10, some empty) along the top.
   for (const slot of bench.slots) {
     const m = matchSlot(buf, w, h, slot, iconHashes.byId);
-    const verdict = classifyMatch(m); // "accept" | "maybe" | "reject"
-    if (verdict === "reject") continue; // empty slot / no real champion
-    if (ids.includes(m.id)) continue; // de-dup (bench champions are distinct)
-    ids.push(m.id);
-    if (verdict === "maybe") uncertain.add(m.id);
+    add(m && m.id, classifyMatch(m));
+  }
+  // Team-pick circles (the 5 locked champions down the left), if visible.
+  const circles = detectTeamCircles(buf, w, h) || [];
+  for (const circle of circles) {
+    const m = matchCircle(buf, w, h, circle, iconHashes.byId);
+    add(m && m.id, classifyCircleMatch(m));
   }
 
   if (!ids.length) {

@@ -17,10 +17,14 @@ const core = require("../src/scan-core.js");
 
 const FIX = path.join(__dirname, "fixtures");
 
-// Rebuild the icon-hash Map (id -> { h: BigInt, sig: number[] }) the pipeline uses.
+// Rebuild the icon-hash Map the pipeline uses: bench squares match the full icon
+// (h/sig); team circles match a center-crop (hC/sigC).
 const iconFixture = JSON.parse(fs.readFileSync(path.join(FIX, "icon-hashes.json"), "utf8"));
 const iconHashById = new Map(
-  iconFixture.items.map((it) => [it.id, { h: BigInt("0x" + it.h), sig: it.sig }]),
+  iconFixture.items.map((it) => [it.id, {
+    h: BigInt("0x" + it.h), sig: it.sig,
+    hC: BigInt("0x" + it.hC), sigC: it.sigC,
+  }]),
 );
 
 // Decode the screenshot fixture into the same RGBA layout as a canvas ImageData.
@@ -72,4 +76,27 @@ test("empty slots sit far from any champion in color space", () => {
   for (const { m } of rejects) {
     assert.ok(m.color > core.SCAN_MAYBE_COLOR, `reject color ${m.color} too close`);
   }
+});
+
+// ---- team-pick circles (the 5 locked champions down the left) ----
+const circles = core.detectTeamCircles(buf, W, H);
+const circleResults = (circles || []).map((c) => {
+  const m = core.matchCircle(buf, W, H, c, iconHashById);
+  return { m, verdict: core.classifyCircleMatch(m) };
+});
+const circleIds = circleResults.filter((r) => r.verdict !== "reject").map((r) => r.m.id);
+const EXPECTED_CIRCLES = ["Velkoz", "Malphite", "Vex", "Xerath", "Aphelios"];
+
+test("detectTeamCircles finds the five team portraits", () => {
+  assert.ok(circles, "circle column should be detected");
+  assert.equal(circles.length, 5);
+});
+
+test("identifies all five team-pick champions, top to bottom", () => {
+  assert.deepEqual(circleIds, EXPECTED_CIRCLES);
+});
+
+test("bench and circles together produce the full visible roster", () => {
+  const all = [...new Set([...detected, ...circleIds])];
+  assert.equal(all.length, EXPECTED.length + EXPECTED_CIRCLES.length);
 });
