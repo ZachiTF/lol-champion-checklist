@@ -363,6 +363,51 @@ test("desktop: identifies all five team-pick champions", () => {
   assert.deepEqual(r3.circleIds, EXPECTED_3_CIRCLES);
 });
 
+// ---- swap-cooldown shadow + centered client (real screenshot) ----
+// A real capture where one bench champion is under the swap-cooldown shadow (a dark
+// radial sweep) and the client is a centered window. PII (summoner names) pixelated.
+// Two things this pins: (1) the shadowed champion is still surfaced (occupancy
+// rescue) instead of read as an empty slot, and (2) all five team circles resolve,
+// including the one a brightness/edge profile would have displaced onto a distractor.
+const png4 = PNG.sync.read(
+  fs.readFileSync(path.join(FIX, "aram-cooldown.png")),
+);
+const W4 = png4.width,
+  H4 = png4.height;
+const bench4 = core.findBenchBar(png4.data, W4, H4, iconHashById);
+const slotVerdicts = bench4.slots.map((s) =>
+  core.classifyMatch(core.matchSlot(png4.data, W4, H4, s, iconHashById)),
+);
+const r4 = detectAll(png4.data, W4, H4);
+const EXPECTED_4_CLEAR = [
+  "Zeri",
+  "Anivia",
+  "Gwen",
+  "Yunara",
+  "Taliyah",
+  "Karma",
+  "Akshan",
+  "JarvanIV",
+];
+const EXPECTED_4_CIRCLES = ["Nautilus", "Sion", "Thresh", "Varus", "Seraphine"];
+
+test("cooldown: the swap-cooldown champion is surfaced, not dropped as empty", () => {
+  // Slot 4 carries the cooldown shadow; its identity is at the noise floor under
+  // the shadow, but it must not be rejected as an empty slot (issue #1).
+  assert.equal(slotVerdicts[4], "maybe");
+  // The one genuinely empty slot (last) is still rejected.
+  assert.equal(slotVerdicts[9], "reject");
+});
+
+test("cooldown: the eight clearly-visible bench champions are all recognized", () => {
+  for (const id of EXPECTED_4_CLEAR)
+    assert.ok(r4.benchIds.includes(id), `bench should include ${id}`);
+});
+
+test("cooldown: all five team-pick champions resolve on a centered client", () => {
+  assert.deepEqual(r4.circleIds, EXPECTED_4_CIRCLES);
+});
+
 // ---- windowed client on a busy desktop (browser chrome + high-contrast UI) ----
 // Reproduces the real failure: a full-screen print where the League client is a
 // window and other UI has FAR higher edge energy than the bench. The old locator

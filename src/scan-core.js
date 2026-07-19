@@ -15,6 +15,16 @@ const SCAN_ACCEPT_COLOR = 16; // color distance below this = confident match
 const SCAN_ACCEPT_HAM = 20; // loose dHash sanity cap for a confident match
 const SCAN_MAYBE_COLOR = 22; // up to here = uncertain (flagged, still shown)
 const SCAN_MAYBE_HAM = 24;
+// A swap-cooldown shadow (a dark radial sweep over a bench champion) darkens part
+// of the icon, pushing its color signature into the "empty" band so a real,
+// still-available champion gets rejected. Occupancy rescue: an actually-filled
+// slot has champion-level internal contrast (luminance std ~30-75) while an empty
+// slot is near-uniform (std ~4-13, even under noise). So when a slot would be
+// color-rejected but is clearly filled AND the dHash still names a plausible
+// champion, surface it as "maybe" instead of dropping it. This only ever upgrades
+// reject→maybe, so the color-based empty rejection is untouched.
+const SCAN_FILL_STD = 20; // luminance std above this = a filled (not empty) slot
+const SCAN_FILL_HAM = 22; // dHash must still roughly name a champion to rescue
 
 // ---- pixel helpers over a flat RGBA buffer (area-averaged downscaling) ----
 function pxLum(buf, W, x, y) {
@@ -27,6 +37,30 @@ function pxSat(buf, W, x, y) {
     Math.max(buf[i], buf[i + 1], buf[i + 2]) -
     Math.min(buf[i], buf[i + 1], buf[i + 2])
   );
+}
+// Occupancy: standard deviation of luminance over a square region. High for a
+// champion portrait (lots of internal contrast, even when a cooldown shadow dims
+// part of it), low for an empty bench panel. Robust to blur/noise/downscale
+// because it's a global contrast measure, not a per-pixel edge count.
+function fillStd(buf, W, H, cx, cy, size) {
+  const x0 = Math.round(cx - size / 2),
+    y0 = Math.round(cy - size / 2);
+  let n = 0,
+    s = 0,
+    s2 = 0;
+  for (let y = y0; y < y0 + size; y++) {
+    if (y < 0 || y >= H) continue;
+    for (let x = x0; x < x0 + size; x++) {
+      if (x < 0 || x >= W) continue;
+      const L = pxLum(buf, W, x, y);
+      s += L;
+      s2 += L * L;
+      n++;
+    }
+  }
+  if (!n) return 0;
+  const m = s / n;
+  return Math.sqrt(Math.max(0, s2 / n - m * m));
 }
 // dHash: downscale region to 9x8 grayscale, compare adjacent columns → 64 bits.
 function dHashRegion(buf, W, H, x0, y0, w, h) {
@@ -440,6 +474,9 @@ function matchSlot(buf, W, H, slot, iconHashById) {
       }
     }
   }
+  // Occupancy of the slot itself (independent of which champion won) so
+  // classifyMatch can tell a shadowed-but-filled slot from an empty one.
+  if (best) best.fill = fillStd(buf, W, H, slot.cx, slot.cy, s);
   return best;
 }
 
@@ -450,6 +487,11 @@ function classifyMatch(m) {
   if (!m) return "reject";
   if (m.color <= SCAN_ACCEPT_COLOR && m.ham <= SCAN_ACCEPT_HAM) return "accept";
   if (m.color <= SCAN_MAYBE_COLOR && m.ham <= SCAN_MAYBE_HAM) return "maybe";
+  // Occupancy rescue: a color-rejected slot that is clearly filled (champion-level
+  // contrast) and still names a plausible champion is a real champion dimmed by a
+  // swap-cooldown shadow — surface it as uncertain rather than dropping it.
+  if (m.fill != null && m.fill >= SCAN_FILL_STD && m.ham <= SCAN_FILL_HAM)
+    return "maybe";
   return "reject";
 }
 
@@ -468,6 +510,44 @@ const CIRCLE_MAYBE_HAM = 26;
 function circleIconRect(size) {
   const t = Math.round((size * (1 - CIRCLE_ICON_FRAC)) / 2);
   return { x: t, y: t, w: size - 2 * t, h: size - 2 * t };
+}
+
+// Given 5 rough row centers (sorted), regularize them to the even spacing the UI
+// actually uses. A brightness/edge profile occasionally puts one row on a strong
+// distractor (a UI divider, a champion's glow) instead of the portrait center;
+// that single outlier is enough to flip a match. RANSAC a 2-point comb (every
+// index pair defines a start+pitch), keep the comb with the most inliers, then
+// snap only the far outliers back onto it. Well-placed rows (all fixtures) are
+// inliers and pass through unchanged; only a genuine outlier (image-1's Thresh,
+// ~17px off) is corrected.
+function regularizeRowCenters(c) {
+  if (c.length < 5) return c;
+  let best = null;
+  for (let i = 0; i < c.length; i++)
+    for (let j = i + 1; j < c.length; j++) {
+      const pitch = (c[j] - c[i]) / (j - i);
+      if (pitch <= 0) continue;
+      const start = c[i] - i * pitch;
+      const tol = Math.max(4, pitch * 0.15);
+      let inliers = 0,
+        err = 0;
+      for (let k = 0; k < c.length; k++) {
+        const d = Math.abs(c[k] - (start + k * pitch));
+        if (d <= tol) inliers++;
+        err += Math.min(d, tol);
+      }
+      if (
+        !best ||
+        inliers > best.inliers ||
+        (inliers === best.inliers && err < best.err)
+      )
+        best = { inliers, err, start, pitch, tol };
+    }
+  if (!best) return c;
+  return c.map((cy, k) => {
+    const pred = best.start + k * best.pitch;
+    return Math.abs(cy - pred) > best.tol ? Math.round(pred) : cy;
+  });
 }
 
 // Locate the 5 team-pick circles within an explicit search region (from
@@ -499,6 +579,9 @@ function detectTeamCirclesIn(buf, W, H, region) {
   }
   if (chosen.length < 3) return null;
   chosen.sort((a, b) => a.y - b.y);
+  // Regularize the row centers to even spacing so a single distractor peak can't
+  // displace a row (only far outliers are snapped; see regularizeRowCenters).
+  const cys = regularizeRowCenters(chosen.map((c) => c.y));
   // median row spacing → circle size; saturation centroid → column center (a few
   // px matter for the dark portraits, so refine cx rather than trusting the region).
   let spacing = region.size / CIRCLE_SIZE_FRAC;
@@ -512,14 +595,14 @@ function detectTeamCirclesIn(buf, W, H, region) {
   const size = Math.round(spacing * 0.56);
   let cxNum = 0,
     cxDen = 0;
-  for (const c of chosen)
+  for (const cy of cys)
     for (let x = xa; x < xb; x++) {
-      const s = pxSat(buf, W, x, c.y);
+      const s = pxSat(buf, W, x, cy);
       cxNum += x * s;
       cxDen += s;
     }
   const cx = cxDen ? Math.round(cxNum / cxDen) : region.cx;
-  return chosen.map((c) => ({ cx, cy: c.y, size }));
+  return cys.map((cy) => ({ cx, cy, size }));
 }
 
 // Locate the team circles by first finding the bench, then the region below it.
