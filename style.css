@@ -1176,6 +1176,171 @@ body.summoner-search-hidden .wip-notice {
   opacity: 1;
 }
 
+/* Live screen-capture controls inside the scan overlay. */
+.scan-live {
+  margin: 0 0 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(200, 155, 60, 0.2);
+}
+.scan-live-start {
+  width: 100%;
+  background: #c89b3c;
+  color: #10131a;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.scan-live-start:hover {
+  background: #d8ac4d;
+}
+.scan-live-video {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  background: #000;
+  border-radius: 6px;
+  border: 1px solid rgba(200, 155, 60, 0.3);
+}
+.scan-live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+/* Cadence line ("Next check in 2s" / "Checking…") where the old button was. */
+.scan-live-next {
+  flex: 1;
+  font-size: 0.85em;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.scan-live-row .scan-action {
+  margin-left: 0;
+}
+
+/* --- Inline scan panel (docked in #scan-results, not a modal) --- */
+.scan-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--card-bg, #151a23);
+  color: var(--fg, #e6e6e6);
+  border: 1px solid rgba(200, 155, 60, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(200, 155, 60, 0.08);
+}
+.scan-panel.dragover {
+  border-color: #c89b3c;
+  box-shadow: 0 0 0 2px rgba(200, 155, 60, 0.5);
+}
+.scan-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.scan-panel-title {
+  font-weight: 700;
+  color: #c89b3c;
+  letter-spacing: 0.4px;
+}
+.scan-panel-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1.3em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.scan-panel-close:hover {
+  opacity: 1;
+}
+.scan-panel-hint {
+  margin: 0 0 14px;
+  font-size: 0.88em;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+.scan-panel-hint kbd {
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0 4px;
+  border: 1px solid rgba(200, 155, 60, 0.4);
+  border-radius: 4px;
+  background: rgba(200, 155, 60, 0.08);
+}
+.scan-sources {
+  margin-bottom: 4px;
+}
+
+/* Stepped progress — makes it obvious the scan is doing something. */
+.scan-steps {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.scan-steps[hidden] {
+  display: none;
+}
+.scan-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 0;
+  font-size: 0.9em;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.scan-step-active,
+.scan-step-done,
+.scan-step-error {
+  opacity: 1;
+}
+.scan-step-mark {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.78em;
+  font-weight: 700;
+}
+.scan-step-pending .scan-step-mark {
+  border: 2px solid rgba(200, 155, 60, 0.35);
+}
+.scan-step-active .scan-step-mark {
+  border: 2px solid rgba(200, 155, 60, 0.3);
+  border-top-color: #c89b3c;
+  animation: scan-spin 0.7s linear infinite;
+}
+.scan-step-done .scan-step-mark {
+  background: #81c784;
+  color: #10131a;
+}
+.scan-step-done .scan-step-mark::before {
+  content: "✓";
+}
+.scan-step-error .scan-step-mark {
+  background: #e57373;
+  color: #10131a;
+}
+.scan-step-error .scan-step-mark::before {
+  content: "✕";
+}
+@keyframes scan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .champion {
   background: var(--card-bg, #151a23);
   border-radius: 8px;

@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 3;
+const FEATURES_VERSION = 4;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -74,6 +74,12 @@ const FEATURE_LIST = [
     title: "Screenshot scan",
     desc: "Paste (Ctrl+V) or drop an ARAM champ-select screenshot — even a full-desktop print screen — and the offered champions you still need are pinned to the top. Open it with 📷 in settings.",
     since: 3,
+  },
+  {
+    icon: "📹",
+    title: "Live screen reading",
+    desc: "No screenshot needed, no install — share the League window once and it reads champion select automatically as picks lock in, then stops sharing when the game starts. Open it with 📷 in settings.",
+    since: 4,
   },
 ];
 

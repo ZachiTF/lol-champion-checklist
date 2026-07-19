@@ -1,5 +1,6 @@
-// Screenshot scan — UI glue: overlay, paste/drop handling, icon-hash building,
-// and the pinned "Available now" group. Pure pipeline math lives in scan-core.js.
+// Screenshot scan — UI glue: the inline scan panel, live screen capture,
+// paste/drop handling, icon-hash building, and the pinned "Available now"
+// group. Pure pipeline math lives in scan-core.js.
 
 // ============================================================================
 // CHAMPION SCAN — paste an ARAM champion-select screenshot, detect the top
@@ -111,13 +112,163 @@ async function ensureIconHashes(onProgress) {
   return iconHashes;
 }
 
+// ============================================================================
+// The scan panel is docked inline inside #scan-results (above the pinned
+// "Available now" results), NOT a modal — so the controls and the results are
+// visible at the same time, and there is no full-screen overlay that closes over
+// the grid (which used to let a stray click land on a champion card underneath).
+// ============================================================================
+let scanPanelOpen = false;
+
+function scanHost() {
+  return document.getElementById("scan-results");
+}
+function scanPanelEl() {
+  return scanHost()?.querySelector(".scan-panel") || null;
+}
+
+// ---- stepped progress (so it's clear something is happening) ----
+// Four honest stages the user can follow — the frame is theirs (they shared the
+// window), so we don't "locate the window"; we find champion select inside it and
+// read its two distinct parts (the available pool, and their team's locked picks).
+const SCAN_STEP_LABELS = [
+  "Prepare champion database",
+  "Find champion select",
+  "Read available champions",
+  "Read your team's picks",
+];
+const STEP_DB = 0,
+  STEP_FIND = 1,
+  STEP_BENCH = 2,
+  STEP_PICKS = 3;
+// null = idle (steps hidden); otherwise one state per step:
+// "pending" | "active" | "done" | "error".
+let scanStepStates = null;
+
+function scanBeginSteps() {
+  scanStepStates = SCAN_STEP_LABELS.map(() => "pending");
+  scanRenderSteps();
+}
+// Set step `i` to `state`; any earlier still-running steps are marked done.
+// (One-shot path — a clean forward sequence.)
+function scanStep(i, state) {
+  if (!scanStepStates) scanStepStates = SCAN_STEP_LABELS.map(() => "pending");
+  for (let k = 0; k < i; k++) {
+    if (scanStepStates[k] === "pending" || scanStepStates[k] === "active")
+      scanStepStates[k] = "done";
+  }
+  scanStepStates[i] = state;
+  scanRenderSteps();
+}
+// Set the whole state vector at once (live path — steps reflect current progress
+// each poll). Skips a re-render when nothing changed so the spinner doesn't reset.
+function scanSetStepStates(states) {
+  const key = states.join(",");
+  if (scanStepStates && scanStepStates.join(",") === key) return;
+  scanStepStates = states.slice();
+  scanRenderSteps();
+}
+function scanRenderSteps() {
+  const ol = scanPanelEl()?.querySelector(".scan-steps");
+  if (!ol) return;
+  if (!scanStepStates) {
+    ol.hidden = true;
+    ol.innerHTML = "";
+    return;
+  }
+  ol.hidden = false;
+  ol.innerHTML = scanStepStates
+    .map(
+      (st, i) =>
+        `<li class="scan-step scan-step-${st}">` +
+        `<span class="scan-step-mark"></span>` +
+        `<span class="scan-step-label">${SCAN_STEP_LABELS[i]}</span></li>`,
+    )
+    .join("");
+}
+function scanSetStatus(msg, isErr) {
+  const s = scanPanelEl()?.querySelector(".scan-status");
+  if (!s) return;
+  s.textContent = msg || "";
+  s.classList.toggle("error", !!isErr);
+}
+// Yield to the browser so a just-set step state actually paints BEFORE we start
+// the next blocking stage — otherwise all three steps flip at once at the very
+// end (locate/read are heavy synchronous work that never lets the DOM repaint).
+function nextPaint() {
+  return new Promise((r) =>
+    requestAnimationFrame(() => requestAnimationFrame(r)),
+  );
+}
+
+// ---- pipeline pieces (shared by the one-shot and live-auto paths) ----
+// Ensure the champion hash DB is ready; returns false if it couldn't load.
+async function ensureScanDb() {
+  await ensureIconHashes((d, t) =>
+    scanSetStatus(`Preparing champion database… ${d}/${t}`),
+  );
+  return !!(iconHashes && iconHashes.byId.size);
+}
+// Locate the champ-select layout in a frame (assumes the DB is ready).
+function locateForScan(buf, w, h) {
+  return locateLayout(buf, w, h, iconHashes.byId);
+}
+// Read the bench (the up-to-10 "available champions" squares). Returns the deduped
+// ids, which are uncertain, and the slots that read as a champion (used later for a
+// cheap "is champion select still here?" check).
+function readBench(buf, w, h, layout) {
+  const ids = [];
+  const uncertain = new Set();
+  const filledSlots = [];
+  for (const slot of layout.bench.slots) {
+    const m = matchSlot(buf, w, h, slot, iconHashes.byId);
+    const verdict = classifyMatch(m);
+    if (verdict === "reject" || !m) continue;
+    filledSlots.push(slot);
+    if (!ids.includes(m.id)) {
+      ids.push(m.id);
+      if (verdict === "maybe") uncertain.add(m.id);
+    }
+  }
+  return { ids, uncertain, filledSlots };
+}
+// Read the 5 team-pick circles down the left. Returns the deduped ids, which are
+// uncertain, and how many of the picks actually resolved (used to detect a full read).
+function readPicks(buf, w, h, layout) {
+  const ids = [];
+  const uncertain = new Set();
+  const circles = detectTeamCirclesIn(buf, w, h, layout.circleRegion) || [];
+  let picks = 0;
+  for (const circle of circles) {
+    const m = matchCircle(buf, w, h, circle, iconHashes.byId);
+    const verdict = classifyCircleMatch(m);
+    if (verdict === "reject" || !m) continue;
+    picks++;
+    if (!ids.includes(m.id)) {
+      ids.push(m.id);
+      if (verdict === "maybe") uncertain.add(m.id);
+    }
+  }
+  return { ids, uncertain, picks };
+}
+// Merge bench + picks reads into one deduped id list (bench first).
+function combineReads(a, b) {
+  const ids = a.ids.slice();
+  const uncertain = new Set(a.uncertain);
+  for (const id of b.ids) {
+    if (!ids.includes(id)) ids.push(id);
+    if (b.uncertain.has(id)) uncertain.add(id);
+  }
+  return { ids, uncertain };
+}
+
 // Run the whole pipeline on a loaded image element.
-async function runScanFromImage(img, setStatus) {
+async function runScanFromImage(img) {
   const w = img.naturalWidth || img.width,
     h = img.naturalHeight || img.height;
   if (!w || !h) {
-    setStatus("That image looks empty.", true);
-    return;
+    scanSetStatus("That image looks empty.", true);
+    return 0;
   }
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -125,67 +276,80 @@ async function runScanFromImage(img, setStatus) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   const buf = ctx.getImageData(0, 0, w, h).data;
-
-  // The locate stage matches against champion icons to find the client by content,
-  // so the hash database must be ready first.
-  setStatus("Preparing champion database…");
-  await ensureIconHashes((d, t) =>
-    setStatus(`Preparing champion database… ${d}/${t}`),
-  );
-  if (!iconHashes.byId.size) {
-    setStatus("Couldn't load champion icons (offline?).", true);
-    return;
-  }
-
-  // Locate the champ-select layout anywhere in the frame (works on a full-desktop
-  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
-  setStatus("Finding the League window…");
-  const layout = locateLayout(buf, w, h, iconHashes.byId);
-  if (!layout) {
-    setStatus(
-      "Couldn't find the champion row. Make sure the top “Available Champions” bar is fully visible in the screenshot.",
-      true,
-    );
-    return;
-  }
-  const { bench, circleRegion } = layout;
-
-  setStatus("Identifying champions…");
-  const ids = [];
-  const uncertain = new Set();
-  const add = (id, verdict) => {
-    if (verdict === "reject" || ids.includes(id)) return;
-    ids.push(id);
-    if (verdict === "maybe") uncertain.add(id);
-  };
-  // Bench squares (up to 10, some empty) along the top.
-  for (const slot of bench.slots) {
-    const m = matchSlot(buf, w, h, slot, iconHashes.byId);
-    add(m && m.id, classifyMatch(m));
-  }
-  // Team-pick circles (the 5 locked champions down the left), if visible.
-  const circles = detectTeamCirclesIn(buf, w, h, circleRegion) || [];
-  for (const circle of circles) {
-    const m = matchCircle(buf, w, h, circle, iconHashes.byId);
-    add(m && m.id, classifyCircleMatch(m));
-  }
-
-  if (!ids.length) {
-    setStatus(
-      "No champions recognized. Try a sharper, unscaled screenshot of the champion-select screen.",
-      true,
-    );
-    return;
-  }
-  scanState = { ids, uncertain, active: true };
-  closeScanOverlay();
-  renderScanResults();
-  document
-    .getElementById("scan-results")
-    ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return runScanFromBuffer(buf, w, h);
 }
 
-// ---- the pinned "Available now" group above the grid ----
+// Run the pipeline on a raw RGBA buffer (a pasted image or a live capture frame)
+// and pin the results. Reports progress through the stepped indicator + status
+// line. Returns the number of champions found. The panel always stays open, so a
+// live capture can read again as the bench fills over ~10s and gets swapped.
+async function runScanFromBuffer(buf, w, h) {
+  ensureScanPanel();
+  scanBeginSteps();
+  await nextPaint(); // paint the "all pending" checklist first
+
+  // Finding champion select matches against champion icons, so the hash database
+  // must be ready first.
+  scanStep(STEP_DB, "active");
+  scanSetStatus("Preparing champion database…");
+  await nextPaint();
+  if (!(await ensureScanDb())) {
+    scanStep(STEP_DB, "error");
+    scanSetStatus("Couldn't load champion icons (offline?).", true);
+    return 0;
+  }
+  scanStep(STEP_DB, "done");
+
+  // Find the champ-select layout anywhere in the frame (works on a full-desktop
+  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
+  scanStep(STEP_FIND, "active");
+  scanSetStatus("Finding champion select…");
+  await nextPaint();
+  const layout = locateForScan(buf, w, h);
+  if (!layout) {
+    scanStep(STEP_FIND, "error");
+    scanSetStatus(
+      "Couldn't find champion select. Make sure the top “Available Champions” bar is fully visible.",
+      true,
+    );
+    return 0;
+  }
+  scanStep(STEP_FIND, "done");
+
+  // Read the available-champion pool (bench squares).
+  scanStep(STEP_BENCH, "active");
+  scanSetStatus("Reading available champions…");
+  await nextPaint();
+  const bench = readBench(buf, w, h, layout);
+  scanStep(STEP_BENCH, "done");
+
+  // Read your team's locked picks (the circles).
+  scanStep(STEP_PICKS, "active");
+  scanSetStatus("Reading your team's picks…");
+  await nextPaint();
+  const picks = readPicks(buf, w, h, layout);
+
+  const { ids, uncertain } = combineReads(bench, picks);
+  if (!ids.length) {
+    scanStep(STEP_PICKS, "error");
+    scanSetStatus(
+      "No champions recognized. Make sure champion select is on screen and the top row is visible.",
+      true,
+    );
+    return 0;
+  }
+  scanStep(STEP_PICKS, "done");
+  scanState = { ids, uncertain, active: true };
+  renderScanResults();
+  const n = ids.length;
+  scanSetStatus(`Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓`);
+  scanHost()
+    ?.querySelector(".scan-pinned")
+    ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return n;
+}
+
+// ---- the pinned "Available now" group (its own child of #scan-results) ----
 function scanDoneCount() {
   const progress = getProgress();
   let done = 0;
@@ -213,8 +377,17 @@ function syncChampionCardState(champId, nowDone) {
 function renderScanResults() {
   const host = document.getElementById("scan-results");
   if (!host) return;
-  host.innerHTML = "";
-  if (!scanState.active || !scanState.ids.length) return;
+  let pinned = host.querySelector(".scan-pinned");
+  if (!scanState.active || !scanState.ids.length) {
+    pinned?.remove();
+    return;
+  }
+  if (!pinned) {
+    pinned = document.createElement("div");
+    pinned.className = "scan-pinned";
+    host.appendChild(pinned); // always after the panel
+  }
+  pinned.innerHTML = "";
 
   const byId = new Map(champions.map((c) => [c.id, c]));
 
@@ -234,7 +407,7 @@ function renderScanResults() {
   const rescan = document.createElement("button");
   rescan.className = "scan-action";
   rescan.textContent = "Scan again";
-  rescan.onclick = openScanOverlay;
+  rescan.onclick = openScanPanel;
   header.appendChild(rescan);
 
   const clear = document.createElement("button");
@@ -262,11 +435,11 @@ function renderScanResults() {
     grid.appendChild(card);
   });
   section.appendChild(grid);
-  host.appendChild(section);
+  pinned.appendChild(section);
   refreshScanCount();
 }
 
-// ---- overlay (button path) + global paste / drag-drop ----
+// ---- image sources: file picker, global paste, drag/drop ----
 function firstImageFromItems(items) {
   for (const it of items || []) {
     if (it.kind === "file" && it.type.startsWith("image/"))
@@ -274,96 +447,402 @@ function firstImageFromItems(items) {
   }
   return null;
 }
-async function handleScanFile(file, setStatus) {
+async function handleScanFile(file) {
+  ensureScanPanel();
   if (!file) {
-    setStatus("No image found — copy a screenshot first.", true);
+    scanSetStatus("No image found — copy a screenshot first.", true);
     return;
   }
   if (!champions.length) {
-    setStatus("Champion data is still loading — try again in a moment.", true);
+    scanSetStatus(
+      "Champion data is still loading — try again in a moment.",
+      true,
+    );
     return;
   }
-  setStatus("Reading screenshot…");
+  scanSetStatus("Reading screenshot…");
   const url = URL.createObjectURL(file);
   try {
     const img = await loadCrossOriginImage(url);
-    await runScanFromImage(img, setStatus);
+    await runScanFromImage(img);
   } catch (_) {
-    setStatus("Couldn't read that image.", true);
+    scanSetStatus("Couldn't read that image.", true);
   } finally {
     URL.revokeObjectURL(url);
   }
 }
-function openScanOverlay() {
-  if (document.getElementById("scan-overlay")) return;
-  const overlay = document.createElement("div");
-  overlay.id = "scan-overlay";
-  overlay.className = "scan-overlay";
 
-  const box = document.createElement("div");
-  box.className = "scan-overlay-box";
-  box.tabIndex = 0;
-  box.innerHTML = `
-    <h3>Scan a champion-select screenshot</h3>
-    <p>Take a screenshot of the ARAM lobby (the top <strong>Available Champions</strong> bar visible), then <strong>paste it here with Ctrl+V</strong> — or drop / choose a file below.</p>
-    <div class="scan-status" role="status"></div>`;
+// ---- live screen capture (getDisplayMedia): auto-read the League window ----
+// Share the League window once and it auto-scans: it polls, retrying until it
+// gets a complete read (bench + all 5 picks), pins that, and then stops scanning.
+// After that it lightly watches for champion select to disappear and auto-drops
+// the screen share when the game starts — so you never share during the game.
+//
+// With no LCU, the only "game started" signal is the pixels: champ select is no
+// longer in the frame. That's reliable when you share the League WINDOW (it stays
+// captured even when unfocused); when you share the whole SCREEN, "gone" is
+// ambiguous with alt-tabbing, so there we also require a generous timer.
+let liveStream = null;
+let liveVideo = null;
+let liveTimer = null; // the single pending poll/watch timeout
+let liveTicker = null; // 250ms interval that renders the "next check in Ns" line
+let liveState = "idle"; // idle | watching | reading | complete
+let liveSurface = "monitor"; // "window" | "monitor" | "browser" (from the track)
+let liveFilledSlots = null; // bench slots that read as champions at the full read
+let liveFullAt = 0; // when the full read landed (ms)
+let liveGoneSince = 0; // when champ select first went missing (ms), 0 = present
+let liveNextCheckAt = 0; // when the next check is scheduled (ms) — drives the countdown
+let liveChecking = false; // true while a read is actually running (blocks the thread)
+
+const LIVE_INTERVAL_MS = 2000; // idle wait between checks (shown as a countdown)
+const LIVE_WATCH_MS = 3000; // cheap "still in champ select?" re-check interval
+const LIVE_WINDOW_GONE_MS = 8000; // window share: gone this long → game started
+const LIVE_SCREEN_GONE_MS = 15000; // screen share: gone this long (alt-tab tolerant)
+const LIVE_SCREEN_MAX_MS = 120000; // screen share: hard cap after a full read
+
+function stopLiveCapture() {
+  if (liveTimer) {
+    clearTimeout(liveTimer);
+    liveTimer = null;
+  }
+  if (liveTicker) {
+    clearInterval(liveTicker);
+    liveTicker = null;
+  }
+  liveState = "idle";
+  liveFilledSlots = null;
+  liveGoneSince = 0;
+  liveNextCheckAt = 0;
+  liveChecking = false;
+  if (liveStream) {
+    liveStream.getTracks().forEach((t) => t.stop());
+    liveStream = null;
+  }
+  if (liveVideo) {
+    liveVideo.srcObject = null;
+    liveVideo = null;
+  }
+  // Nothing is running anymore — clear the checklist so its spinner stops turning.
+  scanStepStates = null;
+  scanRenderSteps();
+}
+
+// Draw the current live frame to a canvas → raw RGBA buffer, or null if not ready.
+function grabLiveFrame() {
+  if (!liveVideo || !liveVideo.videoWidth) return null;
+  const w = liveVideo.videoWidth,
+    h = liveVideo.videoHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(liveVideo, 0, 0, w, h);
+  return { buf: ctx.getImageData(0, 0, w, h).data, w, h };
+}
+
+async function startLiveCapture() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    scanSetStatus("Live capture isn’t supported in this browser.", true);
+    return;
+  }
+  try {
+    liveStream = await navigator.mediaDevices.getDisplayMedia({
+      // ~1 fps preview — the checks take ~2-3s, so there's no point sampling
+      // faster, and it keeps the preview and CPU cost light.
+      video: { frameRate: 1 },
+      audio: false,
+    });
+  } catch (err) {
+    scanSetStatus(
+      err && err.name === "NotAllowedError"
+        ? "Screen share was cancelled."
+        : "Couldn’t start screen capture.",
+      true,
+    );
+    return;
+  }
+  const track = liveStream.getVideoTracks()[0];
+  liveSurface =
+    (track && track.getSettings && track.getSettings().displaySurface) ||
+    "monitor";
+  const video = document.createElement("video");
+  video.className = "scan-live-video";
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = liveStream;
+  await video.play().catch(() => {});
+  liveVideo = video;
+  // If the user stops sharing via the browser's own control, tear down cleanly.
+  track?.addEventListener("ended", () => {
+    stopLiveCapture();
+    renderLiveControls(false);
+    scanSetStatus("Screen sharing stopped.");
+  });
+  renderLiveControls(true);
+  startLiveTicker();
+  runLiveAuto();
+}
+
+// A light 250ms ticker that renders the cadence line: a countdown to the next
+// check, or "Checking…" while one is running. (Replaces the old "Scan now" button
+// — it shows WHEN the next automatic check happens instead of asking for a click.)
+function startLiveTicker() {
+  if (liveTicker) return;
+  liveTicker = setInterval(updateCadence, 250);
+  updateCadence();
+}
+function updateCadence() {
+  const el = scanPanelEl()?.querySelector(".scan-live-next");
+  if (!el) return;
+  if (liveChecking || !liveNextCheckAt) {
+    el.textContent = liveChecking ? "Checking…" : "";
+    return;
+  }
+  const s = Math.max(0, Math.ceil((liveNextCheckAt - Date.now()) / 1000));
+  el.textContent = s > 0 ? `Next check in ${s}s` : "Checking…";
+}
+// Schedule the next check `interval` ms out and reflect it in the countdown.
+function scheduleNextCheck(fn, interval) {
+  liveNextCheckAt = Date.now() + interval;
+  liveTimer = setTimeout(fn, interval);
+  updateCadence();
+}
+
+// Prepare the DB once, then start polling for champion select.
+async function runLiveAuto() {
+  ensureScanPanel();
+  scanBeginSteps();
+  await nextPaint();
+  scanStep(STEP_DB, "active");
+  scanSetStatus("Preparing champion database…");
+  await nextPaint();
+  if (!(await ensureScanDb())) {
+    scanStep(STEP_DB, "error");
+    scanSetStatus("Couldn't load champion icons (offline?).", true);
+    return;
+  }
+  if (!liveVideo) return; // sharing was stopped while the DB loaded
+  scanSetStepStates(["done", "active", "pending", "pending"]);
+  liveState = "watching";
+  scanSetStatus(
+    "Watching for champion select… open your ARAM lobby and it’ll read automatically.",
+  );
+  liveLoop();
+}
+
+// One poll: grab a frame, try to locate + read; advance the state machine.
+async function liveLoop() {
+  if (!liveVideo || (liveState !== "watching" && liveState !== "reading"))
+    return;
+  liveChecking = true;
+  updateCadence();
+  await nextPaint(); // let "Checking…" show before the blocking read
+  const frame = grabLiveFrame();
+  if (frame) {
+    const layout = locateForScan(frame.buf, frame.w, frame.h);
+    if (!layout) {
+      liveState = "watching";
+      scanSetStepStates(["done", "active", "pending", "pending"]);
+      scanSetStatus("Watching for champion select…");
+    } else {
+      liveState = "reading";
+      const bench = readBench(frame.buf, frame.w, frame.h, layout);
+      const picks = readPicks(frame.buf, frame.w, frame.h, layout);
+      const { ids, uncertain } = combineReads(bench, picks);
+      // Steps reflect current progress: found ✓, bench read once we see any pool,
+      // picks in-progress until all 5 lock in.
+      scanSetStepStates([
+        "done",
+        "done",
+        bench.ids.length ? "done" : "active",
+        picks.picks >= 5 ? "done" : "active",
+      ]);
+      if (ids.length) {
+        scanState = { ids, uncertain, active: true };
+        renderScanResults();
+        if (picks.picks >= 5) {
+          // Complete read — pin it, stop scanning, start watching for game start.
+          liveFilledSlots = bench.filledSlots;
+          liveFullAt = Date.now();
+          liveGoneSince = 0;
+          liveState = "complete";
+          liveChecking = false;
+          const scope =
+            liveSurface === "window" ? "the League window" : "your screen";
+          scanSetStatus(
+            `Champion select read ✓ — ${ids.length} champions pinned below. ` +
+              `Waiting for the game to start, then I’ll stop sharing ${scope}.`,
+          );
+          scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
+          return;
+        }
+        scanSetStatus(
+          `Reading champion select… ${picks.picks}/5 picks locked, ${ids.length} champions so far.`,
+        );
+      } else {
+        scanSetStatus("Champion select found — waiting for champions to load…");
+      }
+    }
+  }
+  liveChecking = false;
+  scheduleNextCheck(liveLoop, LIVE_INTERVAL_MS);
+}
+
+// Cheap "is champion select still on screen?" — re-check only the bench slots
+// that were filled at the full read, instead of a full re-locate every tick.
+function liveStillPresent(buf, w, h) {
+  const slots = (liveFilledSlots || []).slice(0, 6);
+  let hits = 0;
+  for (const slot of slots) {
+    const m = matchSlot(buf, w, h, slot, iconHashes.byId);
+    if (m && classifyMatch(m) !== "reject") hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
+// After a full read: watch for champion select to vanish, then drop the share.
+async function liveWatchTick() {
+  if (!liveVideo || liveState !== "complete") return;
+  liveChecking = true;
+  updateCadence();
+  await nextPaint();
+  const frame = grabLiveFrame();
+  const present = frame ? liveStillPresent(frame.buf, frame.w, frame.h) : false;
+  const now = Date.now();
+  if (present) liveGoneSince = 0;
+  else if (!liveGoneSince) liveGoneSince = now;
+
+  const goneFor = liveGoneSince ? now - liveGoneSince : 0;
+  const elapsed = now - liveFullAt;
+  const stop =
+    liveSurface === "window"
+      ? goneFor >= LIVE_WINDOW_GONE_MS
+      : goneFor >= LIVE_SCREEN_GONE_MS || elapsed >= LIVE_SCREEN_MAX_MS;
+
+  if (stop) {
+    const scope =
+      liveSurface === "window" ? "the League window" : "your screen";
+    stopLiveCapture();
+    renderLiveControls(false);
+    scanSetStatus(
+      `Game started — stopped sharing ${scope}. Your champions are still pinned below.`,
+    );
+    return;
+  }
+  liveChecking = false;
+  scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
+}
+
+// (Re)build the live-capture controls inside the panel's .scan-live slot.
+function renderLiveControls(active) {
+  const wrap = scanPanelEl()?.querySelector(".scan-live");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (active && liveVideo) {
+    wrap.appendChild(liveVideo);
+    // Cadence line where the old "Scan now" button was: shows when the next
+    // automatic check runs, so it's clear the scanner is working on its own.
+    const next = document.createElement("span");
+    next.className = "scan-live-next";
+    const stop = document.createElement("button");
+    stop.className = "scan-action";
+    stop.textContent = "Stop sharing";
+    stop.onclick = () => {
+      stopLiveCapture();
+      renderLiveControls(false);
+      scanSetStatus("Screen sharing stopped.");
+    };
+    const row = document.createElement("div");
+    row.className = "scan-live-row";
+    row.appendChild(next);
+    row.appendChild(stop);
+    wrap.appendChild(row);
+    updateCadence();
+  } else {
+    const start = document.createElement("button");
+    start.className = "scan-live-start";
+    start.textContent = "📹 Read live from your screen";
+    start.onclick = startLiveCapture;
+    wrap.appendChild(start);
+  }
+}
+
+// ---- the inline panel itself ----
+// Build the panel once (stable child slots: .scan-live, .scan-sources,
+// .scan-steps, .scan-status) so the live <video> and progress survive re-renders.
+function ensureScanPanel() {
+  const host = scanHost();
+  if (!host) return null;
+  let panel = host.querySelector(".scan-panel");
+  if (panel) return panel;
+  scanPanelOpen = true;
+  panel = document.createElement("div");
+  panel.className = "scan-panel";
+  panel.innerHTML =
+    `<div class="scan-panel-head">` +
+    `<span class="scan-panel-title">📷 Scan champion select</span>` +
+    `<button class="scan-panel-close" title="Hide scanner">×</button>` +
+    `</div>` +
+    `<p class="scan-panel-hint">Read live from your screen (no install — share the ` +
+    `League window once and it reads champion select automatically, then stops ` +
+    `sharing when the game starts), or paste a screenshot with ` +
+    `<kbd>Ctrl</kbd>+<kbd>V</kbd>, drop an image, or choose a file.</p>` +
+    `<div class="scan-live"></div>` +
+    `<div class="scan-sources"></div>` +
+    `<ol class="scan-steps" hidden></ol>` +
+    `<div class="scan-status" role="status"></div>`;
+  // Insert before the pinned results so the panel is always on top.
+  host.insertBefore(panel, host.querySelector(".scan-pinned"));
+
+  panel.querySelector(".scan-panel-close").onclick = closeScanPanel;
+
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*";
   input.className = "scan-file";
-  const setStatus = (msg, isErr) => {
-    const s = box.querySelector(".scan-status");
-    if (s) {
-      s.textContent = msg;
-      s.classList.toggle("error", !!isErr);
-    }
-  };
-  input.onchange = () => handleScanFile(input.files[0], setStatus);
-  box.appendChild(input);
+  input.onchange = () => handleScanFile(input.files[0]);
+  panel.querySelector(".scan-sources").appendChild(input);
 
-  const close = document.createElement("button");
-  close.className = "scan-overlay-close";
-  close.textContent = "×";
-  close.onclick = closeScanOverlay;
-  box.appendChild(close);
+  panel.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    panel.classList.add("dragover");
+  });
+  panel.addEventListener("dragleave", () => panel.classList.remove("dragover"));
+  panel.addEventListener("drop", (e) => {
+    e.preventDefault();
+    panel.classList.remove("dragover");
+    handleScanFile(e.dataTransfer.files[0]);
+  });
 
-  overlay.appendChild(box);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) closeScanOverlay();
-  });
-  overlay.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    box.classList.add("dragover");
-  });
-  overlay.addEventListener("dragleave", () => box.classList.remove("dragover"));
-  overlay.addEventListener("drop", (e) => {
-    e.preventDefault();
-    box.classList.remove("dragover");
-    handleScanFile(e.dataTransfer.files[0], setStatus);
-  });
-  document.body.appendChild(overlay);
-  box.focus();
+  renderLiveControls(false);
+  return panel;
+}
+
+function openScanPanel() {
+  ensureScanPanel();
+  scanHost()?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function closeScanPanel() {
+  scanPanelOpen = false;
+  stopLiveCapture();
+  scanStepStates = null;
+  scanPanelEl()?.remove();
+}
+
+// Back-compat aliases: the settings 📷 button and older callers used these names.
+function openScanOverlay() {
+  openScanPanel();
 }
 function closeScanOverlay() {
-  document.getElementById("scan-overlay")?.remove();
+  closeScanPanel();
 }
 
-// Global paste: if the clipboard holds an image, scan it. When the overlay is
-// open, report status there; otherwise open the overlay to show progress.
+// Global paste: if the clipboard holds an image, reveal the panel and scan it.
 document.addEventListener("paste", (e) => {
   const file = firstImageFromItems(e.clipboardData && e.clipboardData.items);
   if (!file) return;
   e.preventDefault();
-  if (!document.getElementById("scan-overlay")) openScanOverlay();
-  const setStatus = (msg, isErr) => {
-    const s = document.querySelector("#scan-overlay .scan-status");
-    if (s) {
-      s.textContent = msg;
-      s.classList.toggle("error", !!isErr);
-    }
-  };
-  handleScanFile(file, setStatus);
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeScanOverlay();
+  openScanPanel();
+  handleScanFile(file);
 });
