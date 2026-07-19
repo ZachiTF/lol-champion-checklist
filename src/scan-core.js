@@ -436,12 +436,17 @@ function locateLayout(buf, W, H, iconHashById) {
 
 // For one slot, search offsets/sizes around the detected slot size and return the
 // best champion match. `iconHashById` is Map(champId -> { h:BigInt, sig:[27] }).
-function matchSlot(buf, W, H, slot, iconHashById) {
+// `opts.tight` collapses the search to a tiny window — for live capture, where the
+// geometry is already locked from a prior read and the frame is pixel-stable, this
+// is ~45x fewer candidate crops (dropping a poll from ~1.5s to tens of ms).
+function matchSlot(buf, W, H, slot, iconHashById, opts) {
   let best = null;
   const s = slot.size || 52;
-  const off = Math.max(6, Math.round(s * 0.22));
-  const step = Math.max(3, Math.round(off / 2));
-  for (const size of [s - 6, s - 3, s, s + 3, s + 6]) {
+  const tight = opts && opts.tight;
+  const off = tight ? 2 : Math.max(6, Math.round(s * 0.22));
+  const step = tight ? 2 : Math.max(3, Math.round(off / 2));
+  const sizes = tight ? [s] : [s - 6, s - 3, s, s + 3, s + 6];
+  for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
       for (let dy = -off; dy <= off; dy += step) {
@@ -616,14 +621,16 @@ function detectTeamCircles(buf, W, H, iconHashById) {
 // rank against the icons' center-crop hashes (iconHashById entries carry hC/sigC).
 // Offsets scale with the detected size, reducing to the original ±9/step-3 grid
 // when size≈48 so native-resolution results are unchanged.
-function matchCircle(buf, W, H, circle, iconHashById) {
+function matchCircle(buf, W, H, circle, iconHashById, opts) {
   let best = null;
   const s = circle.size;
   const f = s / 48;
-  const off = Math.max(9, Math.round(9 * f));
-  const step = Math.max(3, Math.round(3 * f));
+  const tight = opts && opts.tight;
+  const off = tight ? 3 : Math.max(9, Math.round(9 * f));
+  const step = tight ? 3 : Math.max(3, Math.round(3 * f));
   const ds = Math.max(4, Math.round(4 * f));
-  for (const size of [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds]) {
+  const sizes = tight ? [s] : [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds];
+  for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
       for (let dy = -off; dy <= off; dy += step) {
@@ -660,6 +667,57 @@ function classifyCircleMatch(m) {
   return "reject";
 }
 
+// Read the bench (the up-to-10 "available champions" squares) from a located
+// frame. Returns the deduped ids, which are uncertain, and the slots that read as
+// a champion (used later for a cheap "is champion select still here?" check).
+// `iconHashById` is the champion hash map; `opts.tight` collapses the per-slot
+// search (see matchSlot) for fast reads on pixel-stable live frames.
+function readBench(buf, W, H, layout, iconHashById, opts) {
+  const ids = [];
+  const uncertain = new Set();
+  const filledSlots = [];
+  for (const slot of layout.bench.slots) {
+    const m = matchSlot(buf, W, H, slot, iconHashById, opts);
+    const verdict = classifyMatch(m);
+    if (verdict === "reject" || !m) continue;
+    filledSlots.push(slot);
+    if (!ids.includes(m.id)) {
+      ids.push(m.id);
+      if (verdict === "maybe") uncertain.add(m.id);
+    }
+  }
+  return { ids, uncertain, filledSlots };
+}
+// Read the 5 team-pick circles down the left. Returns the deduped ids, which are
+// uncertain, and how many picks resolved (used to detect a full read).
+function readPicks(buf, W, H, layout, iconHashById, opts) {
+  const ids = [];
+  const uncertain = new Set();
+  const circles = detectTeamCirclesIn(buf, W, H, layout.circleRegion) || [];
+  let picks = 0;
+  for (const circle of circles) {
+    const m = matchCircle(buf, W, H, circle, iconHashById, opts);
+    const verdict = classifyCircleMatch(m);
+    if (verdict === "reject" || !m) continue;
+    picks++;
+    if (!ids.includes(m.id)) {
+      ids.push(m.id);
+      if (verdict === "maybe") uncertain.add(m.id);
+    }
+  }
+  return { ids, uncertain, picks };
+}
+// Merge bench + picks reads into one deduped id list (bench first).
+function combineReads(a, b) {
+  const ids = a.ids.slice();
+  const uncertain = new Set(a.uncertain);
+  for (const id of b.ids) {
+    if (!ids.includes(id)) ids.push(id);
+    if (b.uncertain.has(id)) uncertain.add(id);
+  }
+  return { ids, uncertain };
+}
+
 // Dual-use: expose the pure API to Node (tests) without disturbing the browser,
 // where these top-level declarations are already globals shared across scripts.
 if (typeof module !== "undefined" && module.exports) {
@@ -680,6 +738,9 @@ if (typeof module !== "undefined" && module.exports) {
     detectTeamCirclesIn,
     matchCircle,
     classifyCircleMatch,
+    readBench,
+    readPicks,
+    combineReads,
     circleIconRect,
     SCAN_ACCEPT_COLOR,
     SCAN_ACCEPT_HAM,

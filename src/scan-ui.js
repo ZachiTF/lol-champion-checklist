@@ -54,7 +54,7 @@ async function ensureIconHashes(onProgress) {
           },
         ]),
       );
-      iconHashes = { patch: PATCH, byId };
+      iconHashes = { patch: PATCH, byId, items: raw.items };
       return iconHashes;
     }
   } catch (_) {}
@@ -102,7 +102,7 @@ async function ensureIconHashes(onProgress) {
     }
   }
   await Promise.all(Array.from({ length: CONC }, worker));
-  iconHashes = { patch: PATCH, byId };
+  iconHashes = { patch: PATCH, byId, items };
   try {
     localStorage.setItem(
       ICON_HASH_STORE,
@@ -213,53 +213,131 @@ async function ensureScanDb() {
 function locateForScan(buf, w, h) {
   return locateLayout(buf, w, h, iconHashes.byId);
 }
-// Read the bench (the up-to-10 "available champions" squares). Returns the deduped
-// ids, which are uncertain, and the slots that read as a champion (used later for a
-// cheap "is champion select still here?" check).
-function readBench(buf, w, h, layout) {
-  const ids = [];
-  const uncertain = new Set();
-  const filledSlots = [];
-  for (const slot of layout.bench.slots) {
-    const m = matchSlot(buf, w, h, slot, iconHashes.byId);
-    const verdict = classifyMatch(m);
-    if (verdict === "reject" || !m) continue;
-    filledSlots.push(slot);
-    if (!ids.includes(m.id)) {
-      ids.push(m.id);
-      if (verdict === "maybe") uncertain.add(m.id);
+// (readBench / readPicks / combineReads are pure and live in scan-core.js so the
+// Web Worker can share them; the main thread passes iconHashes.byId explicitly.)
+
+// ---- Web Worker: run locate + read off the main thread (live loop) ----
+// Keeps the UI (preview, countdown, spinner) fluid while a scan runs. Falls back
+// to running the same functions inline when a worker can't be created — notably a
+// page opened from a file:// path, where workers are blocked.
+let scanWorker = null;
+let scanWorkerReady = false;
+let scanWorkerDisabled = false;
+let scanWorkerReadyPromise = null;
+let scanReqId = 1;
+const scanReqPending = new Map(); // id -> resolve
+
+function ensureScanWorker() {
+  if (scanWorker || scanWorkerDisabled) return scanWorker;
+  if (typeof Worker === "undefined" || !iconHashes || !iconHashes.items)
+    return null;
+  try {
+    scanWorker = new Worker("src/scan-worker.js");
+  } catch (_) {
+    scanWorkerDisabled = true; // file:// or blocked — never retry
+    return null;
+  }
+  scanWorkerReadyPromise = new Promise((res) => {
+    scanWorker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "ready") {
+        scanWorkerReady = true;
+        res();
+      } else if (m.type === "result") {
+        const resolve = scanReqPending.get(m.id);
+        if (resolve) {
+          scanReqPending.delete(m.id);
+          resolve(m);
+        }
+      }
+    };
+  });
+  scanWorker.onerror = () => teardownScanWorker(true);
+  scanWorker.postMessage({ type: "hashes", items: iconHashes.items });
+  return scanWorker;
+}
+function teardownScanWorker(disable) {
+  if (scanWorker) {
+    try {
+      scanWorker.terminate();
+    } catch (_) {}
+    scanWorker = null;
+  }
+  scanWorkerReady = false;
+  if (disable) scanWorkerDisabled = true; // worker errored — stay on the main thread
+  scanReqPending.forEach((resolve) => resolve(null));
+  scanReqPending.clear();
+}
+
+// Run one frame through the worker; resolves the worker's message (or null on
+// timeout/failure so the caller can fall back). The buffer is cloned (not
+// transferred) so a fallback can still use it if the worker doesn't answer.
+function scanViaWorker(buf, w, h, cachedLayout, tight) {
+  return new Promise((resolve) => {
+    const id = scanReqId++;
+    let done = false;
+    const finish = (m) => {
+      if (done) return;
+      done = true;
+      resolve(m);
+    };
+    scanReqPending.set(id, (m) => finish(m));
+    setTimeout(() => {
+      if (scanReqPending.delete(id)) finish(null); // worker hung — fall back
+    }, 4000);
+    scanWorker.postMessage({
+      type: "scan",
+      id,
+      buf,
+      w,
+      h,
+      layout: cachedLayout || null,
+      tight: !!tight,
+    });
+  });
+}
+
+// Locate + read a frame, off-thread when possible. Returns
+// { layout, ids, uncertain, picks, benchCount, filledSlots } or { layout:null }.
+async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
+  const worker = ensureScanWorker();
+  if (worker) {
+    if (!scanWorkerReady && scanWorkerReadyPromise) {
+      await Promise.race([
+        scanWorkerReadyPromise,
+        new Promise((r) => setTimeout(r, 1500)),
+      ]);
+    }
+    if (scanWorkerReady) {
+      const m = await scanViaWorker(buf, w, h, cachedLayout, tight);
+      if (m) {
+        if (!m.layout) return { layout: null };
+        return {
+          layout: m.layout,
+          ids: m.ids,
+          uncertain: new Set(m.uncertainIds),
+          picks: m.picks,
+          benchCount: m.benchCount,
+          filledSlots: m.filledSlots,
+        };
+      }
+      // worker failed/timed out — fall through to the main thread (buf is intact)
     }
   }
-  return { ids, uncertain, filledSlots };
-}
-// Read the 5 team-pick circles down the left. Returns the deduped ids, which are
-// uncertain, and how many of the picks actually resolved (used to detect a full read).
-function readPicks(buf, w, h, layout) {
-  const ids = [];
-  const uncertain = new Set();
-  const circles = detectTeamCirclesIn(buf, w, h, layout.circleRegion) || [];
-  let picks = 0;
-  for (const circle of circles) {
-    const m = matchCircle(buf, w, h, circle, iconHashes.byId);
-    const verdict = classifyCircleMatch(m);
-    if (verdict === "reject" || !m) continue;
-    picks++;
-    if (!ids.includes(m.id)) {
-      ids.push(m.id);
-      if (verdict === "maybe") uncertain.add(m.id);
-    }
-  }
-  return { ids, uncertain, picks };
-}
-// Merge bench + picks reads into one deduped id list (bench first).
-function combineReads(a, b) {
-  const ids = a.ids.slice();
-  const uncertain = new Set(a.uncertain);
-  for (const id of b.ids) {
-    if (!ids.includes(id)) ids.push(id);
-    if (b.uncertain.has(id)) uncertain.add(id);
-  }
-  return { ids, uncertain };
+  const layout = cachedLayout || locateForScan(buf, w, h);
+  if (!layout) return { layout: null };
+  const opts = tight ? { tight: true } : undefined;
+  const bench = readBench(buf, w, h, layout, iconHashes.byId, opts);
+  const picks = readPicks(buf, w, h, layout, iconHashes.byId, opts);
+  const { ids, uncertain } = combineReads(bench, picks);
+  return {
+    layout,
+    ids,
+    uncertain,
+    picks: picks.picks,
+    benchCount: bench.ids.length,
+    filledSlots: bench.filledSlots,
+  };
 }
 
 // Run the whole pipeline on a loaded image element.
@@ -320,14 +398,14 @@ async function runScanFromBuffer(buf, w, h) {
   scanStep(STEP_BENCH, "active");
   scanSetStatus("Reading available champions…");
   await nextPaint();
-  const bench = readBench(buf, w, h, layout);
+  const bench = readBench(buf, w, h, layout, iconHashes.byId);
   scanStep(STEP_BENCH, "done");
 
   // Read your team's locked picks (the circles).
   scanStep(STEP_PICKS, "active");
   scanSetStatus("Reading your team's picks…");
   await nextPaint();
-  const picks = readPicks(buf, w, h, layout);
+  const picks = readPicks(buf, w, h, layout, iconHashes.byId);
 
   const { ids, uncertain } = combineReads(bench, picks);
   if (!ids.length) {
@@ -488,6 +566,9 @@ let liveTimer = null; // the single pending poll/watch timeout
 let liveTicker = null; // 250ms interval that renders the "next check in Ns" line
 let liveState = "idle"; // idle | watching | reading | complete
 let liveSurface = "monitor"; // "window" | "monitor" | "browser" (from the track)
+let liveLayout = null; // cached champ-select layout — reused across polls (frame is
+// pixel-stable), so we locate once and then do fast "tight" reads. Dropped whenever
+// a read comes back empty (window moved / champ select gone) to force a re-locate.
 let liveFilledSlots = null; // bench slots that read as champions at the full read
 let liveFullAt = 0; // when the full read landed (ms)
 let liveGoneSince = 0; // when champ select first went missing (ms), 0 = present
@@ -510,6 +591,7 @@ function stopLiveCapture() {
     liveTicker = null;
   }
   liveState = "idle";
+  liveLayout = null;
   liveFilledSlots = null;
   liveGoneSince = 0;
   liveNextCheckAt = 0;
@@ -622,6 +704,7 @@ async function runLiveAuto() {
     return;
   }
   if (!liveVideo) return; // sharing was stopped while the DB loaded
+  ensureScanWorker(); // warm the worker (seed hashes) before the first poll
   scanSetStepStates(["done", "active", "pending", "pending"]);
   liveState = "watching";
   scanSetStatus(
@@ -639,30 +722,46 @@ async function liveLoop() {
   await nextPaint(); // let "Checking…" show before the blocking read
   const frame = grabLiveFrame();
   if (frame) {
-    const layout = locateForScan(frame.buf, frame.w, frame.h);
-    if (!layout) {
+    // Reuse the cached layout if we have one (fast tight reads); only pay for a
+    // full locate when we don't. Runs in the Web Worker when available, so the UI
+    // stays smooth during the ~2s first read and the watching-phase locates.
+    const cached = !!liveLayout;
+    const res = await scanFrameAsync(
+      frame.buf,
+      frame.w,
+      frame.h,
+      liveLayout,
+      cached,
+    );
+    // Sharing may have been stopped during the await — bail if so.
+    if (!liveVideo || (liveState !== "watching" && liveState !== "reading")) {
+      liveChecking = false;
+      return;
+    }
+    if (!res.layout || (!res.ids.length && cached)) {
+      // Nothing here — or a cached layout that stopped reading (window moved /
+      // champ select ended). Drop the cache and go back to watching.
+      liveLayout = null;
       liveState = "watching";
       scanSetStepStates(["done", "active", "pending", "pending"]);
       scanSetStatus("Watching for champion select…");
     } else {
       liveState = "reading";
-      const bench = readBench(frame.buf, frame.w, frame.h, layout);
-      const picks = readPicks(frame.buf, frame.w, frame.h, layout);
-      const { ids, uncertain } = combineReads(bench, picks);
+      if (res.ids.length) liveLayout = res.layout; // cache a layout that reads
       // Steps reflect current progress: found ✓, bench read once we see any pool,
       // picks in-progress until all 5 lock in.
       scanSetStepStates([
         "done",
         "done",
-        bench.ids.length ? "done" : "active",
-        picks.picks >= 5 ? "done" : "active",
+        res.benchCount ? "done" : "active",
+        res.picks >= 5 ? "done" : "active",
       ]);
-      if (ids.length) {
-        scanState = { ids, uncertain, active: true };
+      if (res.ids.length) {
+        scanState = { ids: res.ids, uncertain: res.uncertain, active: true };
         renderScanResults();
-        if (picks.picks >= 5) {
+        if (res.picks >= 5) {
           // Complete read — pin it, stop scanning, start watching for game start.
-          liveFilledSlots = bench.filledSlots;
+          liveFilledSlots = res.filledSlots;
           liveFullAt = Date.now();
           liveGoneSince = 0;
           liveState = "complete";
@@ -670,14 +769,14 @@ async function liveLoop() {
           const scope =
             liveSurface === "window" ? "the League window" : "your screen";
           scanSetStatus(
-            `Champion select read ✓ — ${ids.length} champions pinned below. ` +
+            `Champion select read ✓ — ${res.ids.length} champions pinned below. ` +
               `Waiting for the game to start, then I’ll stop sharing ${scope}.`,
           );
           scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
           return;
         }
         scanSetStatus(
-          `Reading champion select… ${picks.picks}/5 picks locked, ${ids.length} champions so far.`,
+          `Reading champion select… ${res.picks}/5 picks locked, ${res.ids.length} champions so far.`,
         );
       } else {
         scanSetStatus("Champion select found — waiting for champions to load…");
@@ -694,7 +793,7 @@ function liveStillPresent(buf, w, h) {
   const slots = (liveFilledSlots || []).slice(0, 6);
   let hits = 0;
   for (const slot of slots) {
-    const m = matchSlot(buf, w, h, slot, iconHashes.byId);
+    const m = matchSlot(buf, w, h, slot, iconHashes.byId, { tight: true });
     if (m && classifyMatch(m) !== "reject") hits++;
     if (hits >= 2) return true;
   }
