@@ -53,6 +53,9 @@ self.onmessage = (e) => {
       benchCount: bench.ids.length,
       picks: picks.picks,
       filledSlots: bench.filledSlots,
+      // Per-position matches so the main thread can vote across frames.
+      benchSlots: bench.slots,
+      pickCircles: picks.circles,
     });
   }
 };

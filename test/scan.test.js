@@ -437,6 +437,225 @@ test("locates the bench under a higher-contrast distractor (browser chrome)", ()
   assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
 });
 
+// ---- temporal consensus across live frames (identity, recent window) ----
+// The live loop keeps only the last few frames and votes by champion IDENTITY,
+// not position (champ select fills in over time and bench champions get swapped
+// around). Readiness is driven by the five team circles: once all five show a
+// champion for a couple of frames the read is stable. These synthetic tests pin
+// the vote logic; the video-chain test below exercises it on real pixels.
+const mk = (id, score, alts) => ({
+  id,
+  score: score == null ? 5 : score,
+  ham: 8,
+  color: 10,
+  alts: (alts || []).map((a) => ({ id: a })),
+});
+// A frame = { bench:[{m,verdict}], picks:[{m,verdict}] }. Helper to build picks
+// where the first `n` circles show a champion and the rest are grey placeholders.
+const picksFilled = (n, verdict) =>
+  ["Ashe", "Vex", "Sion", "Thresh", "Varus"].map((id, i) =>
+    i < n
+      ? { m: mk(id), verdict: verdict || "accept" }
+      : { m: null, verdict: "reject" },
+  );
+function feed(frames, opts) {
+  const agg = core.createScanAggregator(opts);
+  for (const f of frames)
+    core.aggregateFrame(agg, f.bench || [], f.picks || []);
+  return core.aggregateResult(agg);
+}
+
+test("consensus: a transient misread (gone in the latest frame) is dropped", () => {
+  // Gragas is on the bench throughout; one middle frame misreads it as Garen.
+  const frames = [
+    {
+      bench: [{ m: mk("Gragas", 4, ["Garen"]), verdict: "accept" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Garen", 9, ["Gragas"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Gragas", 4), verdict: "accept" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Gragas", 4), verdict: "accept" }],
+      picks: picksFilled(5),
+    },
+  ];
+  const r = feed(frames);
+  assert.ok(r.ids.includes("Gragas"), "the recurring champion is kept");
+  assert.ok(
+    !r.ids.includes("Garen"),
+    "a one-frame misread now gone is dropped",
+  );
+  assert.ok(!r.uncertain.has("Gragas"), "a recurring accept is confident");
+});
+
+test("consensus: identity voting survives a bench swap (position-independent)", () => {
+  // Same two champions, different bench positions each frame (a swap): both are
+  // recognized regardless of where they sit.
+  const frames = [
+    {
+      bench: [
+        { m: mk("Gragas", 4), verdict: "accept" },
+        { m: mk("Elise", 4), verdict: "accept" },
+      ],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [
+        { m: mk("Elise", 4), verdict: "accept" },
+        { m: mk("Gragas", 4), verdict: "accept" },
+      ],
+      picks: picksFilled(5),
+    },
+  ];
+  const r = feed(frames);
+  assert.ok(r.ids.includes("Gragas") && r.ids.includes("Elise"));
+  assert.ok(!r.uncertain.has("Gragas") && !r.uncertain.has("Elise"));
+});
+
+test("consensus: a genuinely flipping read stays maybe and names alternatives", () => {
+  const frames = [
+    {
+      bench: [{ m: mk("Zeri", 6, ["Zyra"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Zyra", 6, ["Zeri"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Zeri", 6, ["Ziggs"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Zyra", 6, ["Zeri"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+  ];
+  const r = feed(frames);
+  const winner = r.ids.find((id) => ["Zeri", "Zyra"].includes(id));
+  assert.ok(winner, "a champion is still surfaced");
+  assert.ok(r.uncertain.has(winner), "a never-accepted read stays uncertain");
+  assert.ok(
+    (r.alternatives.get(winner) || []).length >= 1,
+    "alternatives shown",
+  );
+});
+
+test("readiness: not stable until all five circles are filled for `confirm` frames", () => {
+  // Four circles filled, over several frames — never ready.
+  assert.equal(
+    feed([{ picks: picksFilled(4) }, { picks: picksFilled(4) }]).stable,
+    false,
+  );
+  // Fifth circle appears: one frame is not enough (a mid-animation flicker).
+  const justFilled = feed([
+    { picks: picksFilled(4) },
+    { picks: picksFilled(5) },
+  ]);
+  assert.equal(
+    justFilled.stable,
+    false,
+    "one frame at 5 picks is not yet stable",
+  );
+  assert.equal(justFilled.picksFilled, 5);
+  // Held for `confirm` (2) frames → stable.
+  assert.equal(
+    feed([{ picks: picksFilled(5) }, { picks: picksFilled(5) }]).stable,
+    true,
+  );
+});
+
+// ---- video chain: a synthetic "video" of champ select filling in over time ----
+// The bench is present from the moment champ select opens; the five TEAM PICKS
+// lock in one at a time. Simulate that by starting from the real fixture and
+// BLACKING OUT the pick circles, then revealing them one per frame (a couple of
+// steady frames after). This is the augmentation the live loop must survive: it
+// must NOT finalize early, then finalize promptly (`confirm` frames) once the
+// fifth pick is in, with the right roster — position-independent, cheap per frame.
+function blackRegion(out, w, h, cx, cy, size) {
+  const half = Math.round((size * 1.4) / 2); // cover the matcher's local search
+  for (let y = cy - half; y <= cy + half; y++) {
+    if (y < 0 || y >= h) continue;
+    for (let x = cx - half; x <= cx + half; x++) {
+      if (x < 0 || x >= w) continue;
+      const i = (y * w + x) * 4;
+      out[i] = out[i + 1] = out[i + 2] = 0; // an unlocked (blacked-out) pick slot
+      out[i + 3] = 255;
+    }
+  }
+}
+// Frames 0..circles.length reveal one more circle each; then +2 steady frames.
+function videoChain(src, w, h, circles) {
+  const frames = [];
+  for (let k = 0; k <= circles.length + 2; k++) {
+    const revealed = Math.min(circles.length, k);
+    const o = Buffer.from(src);
+    for (let i = revealed; i < circles.length; i++)
+      blackRegion(o, w, h, circles[i].cx, circles[i].cy, circles[i].size);
+    frames.push(o);
+  }
+  return frames;
+}
+
+test(
+  "video chain: reads once all five circles fill, at the right moment",
+  SLOW,
+  () => {
+    // Exact circle + bench geometry from the clean fixture (the cached live layout).
+    const layoutCircles = core.detectTeamCircles(buf, W, H, iconHashById);
+    const frames = videoChain(buf, W, H, layoutCircles);
+    const agg = core.createScanAggregator();
+    let stableAt = -1;
+    const readAt = []; // ids known at each frame, for the running-prediction check
+    frames.forEach((fb, k) => {
+      const benchPos = bench.slots.map((s) => {
+        const m = core.matchSlot(fb, W, H, s, iconHashById, { tight: true });
+        return { m, verdict: core.classifyMatch(m) };
+      });
+      const circPos = layoutCircles.map((c) => {
+        const m = core.matchCircle(fb, W, H, c, iconHashById, { tight: true });
+        return { m, verdict: core.classifyCircleMatch(m) };
+      });
+      core.aggregateFrame(agg, benchPos, circPos);
+      const r = core.aggregateResult(agg);
+      readAt.push(r);
+      if (r.stable && stableAt < 0) stableAt = k;
+    });
+
+    // The fifth circle is revealed at frame index 5; with confirm=2 it must not be
+    // stable before then, and must go stable exactly one frame later (5 held twice).
+    assert.equal(readAt[4].stable, false, "4 circles filled → never stable");
+    assert.equal(
+      readAt[5].stable,
+      false,
+      "just-filled (1 frame) → not yet stable",
+    );
+    assert.equal(
+      stableAt,
+      6,
+      "stable exactly when 5 picks have held for `confirm`",
+    );
+
+    // The finalized roster is the full board, and the bench was already being read
+    // (running predictions) well before finalize — the picks just gated the finish.
+    const finalIds = readAt[stableAt].ids;
+    for (const id of EXPECTED)
+      assert.ok(finalIds.includes(id), `bench should include ${id}`);
+    for (const id of EXPECTED_CIRCLES)
+      assert.ok(finalIds.includes(id), `picks should include ${id}`);
+    assert.ok(
+      readAt[0].ids.length >= EXPECTED.length,
+      "the bench is predicted live from the very first frame, before picks lock",
+    );
+  },
+);
+
 // ---- augmentation robustness: each fixture through realistic variations ----
 // The fit (locate + bench) must survive rescaling, resampling softness, mild
 // noise, translation, and JPEG-style recompression — the things a real pasted

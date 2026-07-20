@@ -440,7 +440,11 @@ function locateLayout(buf, W, H, iconHashById) {
 // geometry is already locked from a prior read and the frame is pixel-stable, this
 // is ~45x fewer candidate crops (dropping a poll from ~1.5s to tens of ms).
 function matchSlot(buf, W, H, slot, iconHashById, opts) {
-  let best = null;
+  // Keep the best score seen per champion id across the whole local search, so we
+  // can return not just the winner but the runner-up champions (best.alts). The
+  // live consensus uses those runners-up as the "alternatives" for an uncertain
+  // slot, and voting across frames leans on them too.
+  const per = new Map();
   const s = slot.size || 52;
   const tight = opts && opts.tight;
   const off = tight ? 2 : Math.max(6, Math.round(s * 0.22));
@@ -473,15 +477,19 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
           const id = cands[i].id;
           const c = colorDist(sig, iconHashById.get(id).sig);
           const score = cands[i].d + c * 0.35;
-          if (!best || score < best.score)
-            best = { id, ham: cands[i].d, color: c, score };
+          const prev = per.get(id);
+          if (!prev || score < prev.score)
+            per.set(id, { id, ham: cands[i].d, color: c, score });
         }
       }
     }
   }
+  if (!per.size) return null;
+  const ranked = [...per.values()].sort((a, b) => a.score - b.score);
+  const best = { ...ranked[0], alts: ranked.slice(0, 4) };
   // Occupancy of the slot itself (independent of which champion won) so
   // classifyMatch can tell a shadowed-but-filled slot from an empty one.
-  if (best) best.fill = fillStd(buf, W, H, slot.cx, slot.cy, s);
+  best.fill = fillStd(buf, W, H, slot.cx, slot.cy, s);
   return best;
 }
 
@@ -622,7 +630,7 @@ function detectTeamCircles(buf, W, H, iconHashById) {
 // Offsets scale with the detected size, reducing to the original ±9/step-3 grid
 // when size≈48 so native-resolution results are unchanged.
 function matchCircle(buf, W, H, circle, iconHashById, opts) {
-  let best = null;
+  const per = new Map();
   const s = circle.size;
   const f = s / 48;
   const tight = opts && opts.tight;
@@ -647,13 +655,16 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
           const id = cands[i].id;
           const c = colorDist(sig, iconHashById.get(id).sigC);
           const score = cands[i].d + c * 0.35;
-          if (!best || score < best.score)
-            best = { id, ham: cands[i].d, color: c, score };
+          const prev = per.get(id);
+          if (!prev || score < prev.score)
+            per.set(id, { id, ham: cands[i].d, color: c, score });
         }
       }
     }
   }
-  return best;
+  if (!per.size) return null;
+  const ranked = [...per.values()].sort((a, b) => a.score - b.score);
+  return { ...ranked[0], alts: ranked.slice(0, 4) };
 }
 
 // Team circles are always real champions (a full ARAM team is 5), so there is no
@@ -676,9 +687,13 @@ function readBench(buf, W, H, layout, iconHashById, opts) {
   const ids = [];
   const uncertain = new Set();
   const filledSlots = [];
+  // Per-position result for EVERY slot (including empty ones), in bench order, so
+  // the live consensus can vote position-by-position across frames.
+  const slots = [];
   for (const slot of layout.bench.slots) {
     const m = matchSlot(buf, W, H, slot, iconHashById, opts);
     const verdict = classifyMatch(m);
+    slots.push({ m, verdict });
     if (verdict === "reject" || !m) continue;
     filledSlots.push(slot);
     if (!ids.includes(m.id)) {
@@ -686,7 +701,7 @@ function readBench(buf, W, H, layout, iconHashById, opts) {
       if (verdict === "maybe") uncertain.add(m.id);
     }
   }
-  return { ids, uncertain, filledSlots };
+  return { ids, uncertain, filledSlots, slots };
 }
 // Read the 5 team-pick circles down the left. Returns the deduped ids, which are
 // uncertain, and how many picks resolved (used to detect a full read).
@@ -694,10 +709,14 @@ function readPicks(buf, W, H, layout, iconHashById, opts) {
   const ids = [];
   const uncertain = new Set();
   const circles = detectTeamCirclesIn(buf, W, H, layout.circleRegion) || [];
+  // Per-position result for every detected circle (top-to-bottom), so the live
+  // consensus can vote each pick slot across frames as picks lock in.
+  const circleResults = [];
   let picks = 0;
   for (const circle of circles) {
     const m = matchCircle(buf, W, H, circle, iconHashById, opts);
     const verdict = classifyCircleMatch(m);
+    circleResults.push({ m, verdict });
     if (verdict === "reject" || !m) continue;
     picks++;
     if (!ids.includes(m.id)) {
@@ -705,7 +724,7 @@ function readPicks(buf, W, H, layout, iconHashById, opts) {
       if (verdict === "maybe") uncertain.add(m.id);
     }
   }
-  return { ids, uncertain, picks };
+  return { ids, uncertain, picks, circles: circleResults };
 }
 // Merge bench + picks reads into one deduped id list (bench first).
 function combineReads(a, b) {
@@ -716,6 +735,120 @@ function combineReads(a, b) {
     if (b.uncertain.has(id)) uncertain.add(id);
   }
   return { ids, uncertain };
+}
+
+// ---- temporal consensus across live frames --------------------------------
+// Champ select FILLS IN over time (the five team picks lock one by one) and then
+// people SWAP bench champions around in a chaotic way, so a champion does NOT
+// stay in a fixed slot. Tracking per-position is therefore the wrong model: it
+// mislabels a late-locking pick and can drop a late bench swap. Instead we keep
+// only the last few frames and vote by champion IDENTITY (anywhere on screen):
+//   • a champion recognized in most recent frames is confident;
+//   • one seen in a single old frame (a transient misread — a frame grabbed mid-
+//     animation, a cursor over an icon) is filtered out;
+//   • one seen intermittently is surfaced as "maybe" with its alternatives.
+// The readiness signal is dead simple and cheap: the five TEAM CIRCLES. While any
+// circle is still a grey placeholder we keep watching; once all five show a
+// champion (for a couple of frames, so a mid-animation flicker can't trigger it)
+// the read is stable and we finalize. A short window also keeps latency low —
+// finalize lands ~`confirm` polls after the fifth pick appears, not seconds later.
+const AGG_WINDOW = 4; // recent frames kept for identity voting (older ones drop off)
+const AGG_CONFIRM = 2; // frames an id / the 5-circles signal must hold to be trusted
+
+function createScanAggregator(opts) {
+  const o = opts || {};
+  return {
+    window: [],
+    maxFrames: o.window || AGG_WINDOW,
+    confirm: o.confirm || AGG_CONFIRM,
+  };
+}
+// Reduce one frame's per-position matches to what identity voting needs: the set
+// of recognized champions (with their best verdict + alternative ids) and how
+// many of the five team circles currently show a champion.
+function aggFrameRecord(benchSlots, pickCircles) {
+  const info = new Map(); // id -> { accept:bool, alts:Set }
+  const fold = (pos) => {
+    const m = pos && pos.m;
+    if (!m || pos.verdict === "reject") return false;
+    let rec = info.get(m.id);
+    if (!rec) {
+      rec = { accept: false, alts: new Set() };
+      info.set(m.id, rec);
+    }
+    if (pos.verdict === "accept") rec.accept = true;
+    for (const a of m.alts || []) if (a.id !== m.id) rec.alts.add(a.id);
+    return true;
+  };
+  for (const s of benchSlots || []) fold(s);
+  let picksFilled = 0;
+  for (const c of pickCircles || []) if (fold(c)) picksFilled++;
+  return { info, picksFilled };
+}
+// Push a frame into the rolling window (dropping the oldest beyond maxFrames).
+function aggregateFrame(agg, benchSlots, pickCircles) {
+  agg.window.push(aggFrameRecord(benchSlots, pickCircles));
+  while (agg.window.length > agg.maxFrames) agg.window.shift();
+}
+// Read the running consensus over the recent window: the deduped id list, which
+// ids are uncertain, each uncertain id's alternative champions, per-id support,
+// how many circles are filled right now, and whether the read is stable.
+function aggregateResult(agg) {
+  const frames = agg.window;
+  const n = frames.length;
+  const last = n ? frames[n - 1] : null;
+  const confirm = Math.min(agg.confirm, n || 1);
+  // Tally appearances + collect alternatives across the window; keep a stable
+  // first-seen order so the pinned list doesn't reshuffle every poll.
+  const seen = new Map(); // id -> { count, accept, alts:Set }
+  const order = [];
+  for (const f of frames) {
+    f.info.forEach((rec, id) => {
+      let s = seen.get(id);
+      if (!s) {
+        s = { count: 0, accept: false, alts: new Set() };
+        seen.set(id, s);
+        order.push(id);
+      }
+      s.count++;
+      if (rec.accept) s.accept = true;
+      rec.alts.forEach((a) => s.alts.add(a));
+    });
+  }
+  const ids = [];
+  const uncertain = new Set();
+  const alternatives = new Map();
+  const confidence = new Map();
+  for (const id of order) {
+    const s = seen.get(id);
+    // Show an id if it's held across enough recent frames (real) OR it's in the
+    // current frame (the honest live guess). An id seen only in an OLD frame and
+    // gone now is a transient misread — dropped.
+    if (s.count < confirm && !(last && last.info.has(id))) continue;
+    // Confident only when it recurs AND at least one clean "accept" read backs it.
+    const verdict = s.count >= confirm && s.accept ? "accept" : "maybe";
+    ids.push(id);
+    if (verdict === "maybe") uncertain.add(id);
+    const alts = [...s.alts].filter((a) => a !== id).slice(0, 3);
+    if (alts.length) alternatives.set(id, alts);
+    confidence.set(id, { count: s.count, frames: n });
+  }
+  // Readiness: all five team circles filled for the last `confirm` frames.
+  let picksStreak = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    if (frames[i].picksFilled >= 5) picksStreak++;
+    else break;
+  }
+  return {
+    ids,
+    uncertain,
+    alternatives,
+    confidence,
+    picksFilled: last ? last.picksFilled : 0,
+    picksStreak,
+    frames: n,
+    stable: n >= confirm && picksStreak >= confirm,
+  };
 }
 
 // Dual-use: expose the pure API to Node (tests) without disturbing the browser,
@@ -741,7 +874,12 @@ if (typeof module !== "undefined" && module.exports) {
     readBench,
     readPicks,
     combineReads,
+    createScanAggregator,
+    aggregateFrame,
+    aggregateResult,
     circleIconRect,
+    AGG_WINDOW,
+    AGG_CONFIRM,
     SCAN_ACCEPT_COLOR,
     SCAN_ACCEPT_HAM,
     SCAN_MAYBE_COLOR,

@@ -1110,6 +1110,75 @@ body.summoner-search-hidden .wip-notice {
   position: relative;
 }
 
+/* "Double-check" list: each uncertain champion's best guess vs. its alternatives,
+   so the user can eyeball what else it might be instead of trusting one pick. */
+.scan-uncertain-list {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(200, 155, 60, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scan-uncertain-head {
+  font-size: 0.85em;
+  opacity: 0.8;
+  margin-bottom: 2px;
+}
+.scan-uncertain-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scan-uncertain-or {
+  font-size: 0.8em;
+  opacity: 0.6;
+  font-style: italic;
+}
+.scan-uncertain-alts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.scan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(200, 155, 60, 0.35);
+  background: rgba(200, 155, 60, 0.06);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85em;
+  line-height: 1.2;
+}
+.scan-chip:hover {
+  border-color: rgba(200, 155, 60, 0.75);
+}
+.scan-chip img {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.scan-chip-best {
+  border-color: rgba(200, 155, 60, 0.7);
+  font-weight: 600;
+}
+.scan-chip-alt {
+  opacity: 0.9;
+}
+.scan-chip.done {
+  border-color: #81c784;
+  background: rgba(129, 199, 132, 0.14);
+}
+.scan-chip.done span {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
 .scan-overlay {
   position: fixed;
   inset: 0;
@@ -1788,4 +1857,31 @@ body.summoner-search-hidden .wip-notice {
     opacity: 0;
     transition: opacity 0.4s ease;
   }
+}
+
+/* ---- page footer: credit + links ---- */
+.page-footer {
+  margin: 40px auto 24px;
+  padding: 20px 16px 0;
+  border-top: 1px solid var(--hairline, rgba(200, 155, 60, 0.2));
+  text-align: center;
+  font-size: 0.9em;
+  color: var(--muted-fg, rgba(230, 230, 230, 0.6));
+}
+.footer-credit {
+  margin: 0 0 6px;
+}
+.footer-heart {
+  color: #e0567a;
+}
+.footer-links a {
+  color: #c89b3c;
+  text-decoration: none;
+}
+.footer-links a:hover {
+  text-decoration: underline;
+}
+.footer-sep {
+  margin: 0 8px;
+  opacity: 0.5;
 }

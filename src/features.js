@@ -78,8 +78,18 @@ const FEATURE_LIST = [
   {
     icon: "📹",
     title: "Live screen reading",
-    desc: "No screenshot needed, no install — share the League window once and it reads champion select automatically as picks lock in, then stops sharing when the game starts. Open it with 📷 in settings.",
+    desc: "Share the League window once and it reads champion select automatically as picks lock in, then stops sharing when the game starts. Open it with 📷 in settings.",
     since: 4,
+    sub: [
+      {
+        title: "Reads across many frames",
+        desc: "it confirms each champion over several quick reads instead of trusting one — far fewer wrong picks, and you see the running best guess as it goes.",
+      },
+      {
+        title: "Shows alternatives",
+        desc: "when a champion is uncertain, it lists what else it might be so you can double-check at a glance.",
+      },
+    ],
   },
 ];
 
@@ -155,7 +165,7 @@ function openFeaturesOverlay() {
 
   const close = document.createElement("button");
   close.className = "scan-overlay-close";
-  close.textContent = "×";
+  close.textContent = "x";
   close.title = "Close";
   close.onclick = closeFeaturesOverlay;
   box.appendChild(close);

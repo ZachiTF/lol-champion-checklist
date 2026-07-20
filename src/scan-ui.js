@@ -14,7 +14,12 @@
 // ============================================================================
 
 // Detected champion ids from the last scan; renderScanResults pins these.
-let scanState = { ids: [], uncertain: new Set(), active: false };
+let scanState = {
+  ids: [],
+  uncertain: new Set(),
+  alternatives: new Map(),
+  active: false,
+};
 
 // Champion icon hashes, keyed by champ id: { h: BigInt (64-bit dHash), sig: [27] }.
 let iconHashes = null;
@@ -216,6 +221,26 @@ function locateForScan(buf, w, h) {
 // (readBench / readPicks / combineReads are pure and live in scan-core.js so the
 // Web Worker can share them; the main thread passes iconHashes.byId explicitly.)
 
+// For the one-shot (single-frame) path there's no cross-frame consensus, so an
+// uncertain id's "alternatives" are just the runner-up champions from the slot it
+// matched. Returns Map(id -> [altId, ...]) for the uncertain ids only.
+function altsFromReads(reads, uncertain) {
+  const out = new Map();
+  if (!uncertain || !uncertain.size) return out;
+  for (const r of reads) {
+    for (const pos of r.slots || r.circles || []) {
+      const m = pos.m;
+      if (!m || !uncertain.has(m.id) || out.has(m.id)) continue;
+      const alts = (m.alts || [])
+        .map((a) => a.id)
+        .filter((id) => id !== m.id)
+        .slice(0, 3);
+      if (alts.length) out.set(m.id, alts);
+    }
+  }
+  return out;
+}
+
 // ---- Web Worker: run locate + read off the main thread (live loop) ----
 // Keeps the UI (preview, countdown, spinner) fluid while a scan runs. Falls back
 // to running the same functions inline when a worker can't be created — notably a
@@ -319,6 +344,8 @@ async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
           picks: m.picks,
           benchCount: m.benchCount,
           filledSlots: m.filledSlots,
+          benchSlots: m.benchSlots,
+          pickCircles: m.pickCircles,
         };
       }
       // worker failed/timed out — fall through to the main thread (buf is intact)
@@ -337,6 +364,8 @@ async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
     picks: picks.picks,
     benchCount: bench.ids.length,
     filledSlots: bench.filledSlots,
+    benchSlots: bench.slots,
+    pickCircles: picks.circles,
   };
 }
 
@@ -417,7 +446,13 @@ async function runScanFromBuffer(buf, w, h) {
     return 0;
   }
   scanStep(STEP_PICKS, "done");
-  scanState = { ids, uncertain, active: true };
+  scanState = {
+    ids,
+    uncertain,
+    alternatives: altsFromReads([bench, picks], uncertain),
+    active: true,
+    finalized: true,
+  };
   renderScanResults();
   const n = ids.length;
   scanSetStatus(`Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓`);
@@ -493,7 +528,12 @@ function renderScanResults() {
   clear.textContent = "×";
   clear.title = "Dismiss";
   clear.onclick = () => {
-    scanState = { ids: [], uncertain: new Set(), active: false };
+    scanState = {
+      ids: [],
+      uncertain: new Set(),
+      alternatives: new Map(),
+      active: false,
+    };
     renderScanResults();
   };
   header.appendChild(clear);
@@ -501,20 +541,102 @@ function renderScanResults() {
 
   const grid = document.createElement("div");
   grid.className = "champion-grid-region scan-grid";
+  const alternatives = scanState.alternatives || new Map();
   scanState.ids.forEach((id) => {
     const champ = byId.get(id);
     if (!champ) return;
     const card = createChampionCard(champ);
     if (scanState.uncertain.has(id)) {
       card.classList.add("scan-uncertain");
+      const alts = (alternatives.get(id) || [])
+        .map((a) => byId.get(a)?.name)
+        .filter(Boolean);
       card.title =
-        (card.title ? card.title + " — " : "") + "uncertain match, verify";
+        (card.title ? card.title + " — " : "") +
+        "uncertain match, verify" +
+        (alts.length ? ` (or ${alts.join(", ")})` : "");
     }
     grid.appendChild(card);
   });
   section.appendChild(grid);
+
+  // "Double-check" list: for every uncertain champion, show what else it might be
+  // so the user can eyeball the alternatives instead of just trusting the pick.
+  const uncertainWithAlts = scanState.ids.filter(
+    (id) => scanState.uncertain.has(id) && (alternatives.get(id) || []).length,
+  );
+  if (uncertainWithAlts.length) {
+    const note = document.createElement("div");
+    note.className = "scan-uncertain-list";
+    const h = document.createElement("div");
+    h.className = "scan-uncertain-head";
+    h.textContent = scanState.finalized
+      ? "Double-check these — best guess vs. alternatives:"
+      : "Still deciding — current best guess vs. alternatives:";
+    note.appendChild(h);
+    for (const id of uncertainWithAlts) {
+      const champ = byId.get(id);
+      if (!champ) continue;
+      const row = document.createElement("div");
+      row.className = "scan-uncertain-row";
+      row.appendChild(scanMiniChip(champ, "best"));
+      const arrow = document.createElement("span");
+      arrow.className = "scan-uncertain-or";
+      arrow.textContent = "or";
+      row.appendChild(arrow);
+      const altWrap = document.createElement("div");
+      altWrap.className = "scan-uncertain-alts";
+      for (const altId of alternatives.get(id) || []) {
+        const alt = byId.get(altId);
+        if (alt) altWrap.appendChild(scanMiniChip(alt, "alt"));
+      }
+      row.appendChild(altWrap);
+      note.appendChild(row);
+    }
+    section.appendChild(note);
+  }
+
   pinned.appendChild(section);
   refreshScanCount();
+}
+
+// A small icon+name chip used in the "double-check" alternatives list. `kind` is
+// "best" (the winning guess) or "alt" (a runner-up). Clicking a chip toggles that
+// champion done, just like a card — handy when the alternative is the real one.
+function scanMiniChip(champ, kind) {
+  const chip = document.createElement("button");
+  chip.className = "scan-chip scan-chip-" + kind;
+  chip.title =
+    kind === "best" ? `${champ.name} (best guess)` : `Could be ${champ.name}`;
+  const img = document.createElement("img");
+  img.src = `${CHAMPION_ICON_BASE}${champ.image.full}`;
+  img.alt = champ.name;
+  const name = document.createElement("span");
+  name.textContent = champ.name;
+  chip.appendChild(img);
+  chip.appendChild(name);
+  chip.onclick = () => {
+    const progress = getProgress();
+    const nowDone = !progress[champ.id];
+    const key = clearedTimestampKey(champ.id);
+    if (nowDone) {
+      progress[champ.id] =
+        clearedTimestamps.get(key) || new Date().toISOString();
+      clearedTimestamps.delete(key);
+    } else {
+      clearedTimestamps.set(key, progress[champ.id]);
+      progress[champ.id] = false;
+    }
+    syncChampionCardState(champ.id, nowDone);
+    saveState();
+    updateProgressText();
+    refreshFilterCounts();
+    refreshScanCount();
+    renderHistory();
+    chip.classList.toggle("done", nowDone);
+  };
+  if (getProgress()[champ.id]) chip.classList.add("done");
+  return chip;
 }
 
 // ---- image sources: file picker, global paste, drag/drop ----
@@ -569,13 +691,18 @@ let liveSurface = "monitor"; // "window" | "monitor" | "browser" (from the track
 let liveLayout = null; // cached champ-select layout — reused across polls (frame is
 // pixel-stable), so we locate once and then do fast "tight" reads. Dropped whenever
 // a read comes back empty (window moved / champ select gone) to force a re-locate.
+let liveAgg = null; // temporal-consensus accumulator over the reading window (votes
+// each slot across frames). Reset whenever champ select goes missing so a fresh
+// lobby starts from a clean slate.
 let liveFilledSlots = null; // bench slots that read as champions at the full read
 let liveFullAt = 0; // when the full read landed (ms)
 let liveGoneSince = 0; // when champ select first went missing (ms), 0 = present
 let liveNextCheckAt = 0; // when the next check is scheduled (ms) — drives the countdown
 let liveChecking = false; // true while a read is actually running (blocks the thread)
 
-const LIVE_INTERVAL_MS = 2000; // idle wait between checks (shown as a countdown)
+// Reads are cheap now (tight per-slot search, off-thread in a Web Worker), so we
+// poll often and build a consensus from many frames rather than trusting one.
+const LIVE_INTERVAL_MS = 600; // wait between reading-phase checks (shown as countdown)
 const LIVE_WATCH_MS = 3000; // cheap "still in champ select?" re-check interval
 const LIVE_WINDOW_GONE_MS = 8000; // window share: gone this long → game started
 const LIVE_SCREEN_GONE_MS = 15000; // screen share: gone this long (alt-tab tolerant)
@@ -592,6 +719,7 @@ function stopLiveCapture() {
   }
   liveState = "idle";
   liveLayout = null;
+  liveAgg = null;
   liveFilledSlots = null;
   liveGoneSince = 0;
   liveNextCheckAt = 0;
@@ -629,9 +757,10 @@ async function startLiveCapture() {
   }
   try {
     liveStream = await navigator.mediaDevices.getDisplayMedia({
-      // ~1 fps preview — the checks take ~2-3s, so there's no point sampling
-      // faster, and it keeps the preview and CPU cost light.
-      video: { frameRate: 1 },
+      // A few fps so each fast poll (~600ms) grabs a genuinely fresh frame — the
+      // consensus wants independent frames, not the same one re-read. Champ select
+      // is near-static, so this stays cheap.
+      video: { frameRate: 5 },
       audio: false,
     });
   } catch (err) {
@@ -713,7 +842,10 @@ async function runLiveAuto() {
   liveLoop();
 }
 
-// One poll: grab a frame, try to locate + read; advance the state machine.
+// One poll: grab a frame, read it, fold it into the running consensus, and show
+// the current best guess. Advances the state machine; finalizes only once the
+// consensus is STABLE (all 5 picks settled across several frames), never on a
+// single frame — that's what makes a transient misread unable to win.
 async function liveLoop() {
   if (!liveVideo || (liveState !== "watching" && liveState !== "reading"))
     return;
@@ -724,7 +856,7 @@ async function liveLoop() {
   if (frame) {
     // Reuse the cached layout if we have one (fast tight reads); only pay for a
     // full locate when we don't. Runs in the Web Worker when available, so the UI
-    // stays smooth during the ~2s first read and the watching-phase locates.
+    // stays smooth during the first read and the watching-phase locates.
     const cached = !!liveLayout;
     const res = await scanFrameAsync(
       frame.buf,
@@ -740,27 +872,40 @@ async function liveLoop() {
     }
     if (!res.layout || (!res.ids.length && cached)) {
       // Nothing here — or a cached layout that stopped reading (window moved /
-      // champ select ended). Drop the cache and go back to watching.
+      // champ select ended). Drop the cache + consensus and go back to watching.
       liveLayout = null;
+      liveAgg = null;
       liveState = "watching";
       scanSetStepStates(["done", "active", "pending", "pending"]);
       scanSetStatus("Watching for champion select…");
     } else {
       liveState = "reading";
       if (res.ids.length) liveLayout = res.layout; // cache a layout that reads
-      // Steps reflect current progress: found ✓, bench read once we see any pool,
-      // picks in-progress until all 5 lock in.
+      // Fold this frame's per-position matches into the consensus, then read the
+      // current aggregate — that (not the single frame) drives the UI.
+      if (!liveAgg) liveAgg = createScanAggregator();
+      aggregateFrame(liveAgg, res.benchSlots, res.pickCircles);
+      const agg = aggregateResult(liveAgg);
       scanSetStepStates([
         "done",
         "done",
-        res.benchCount ? "done" : "active",
-        res.picks >= 5 ? "done" : "active",
+        agg.ids.length ? "done" : "active",
+        agg.picksFilled >= 5 ? "done" : "active",
       ]);
-      if (res.ids.length) {
-        scanState = { ids: res.ids, uncertain: res.uncertain, active: true };
+      if (agg.ids.length) {
+        // Show the running prediction every poll, uncertain ones flagged with the
+        // alternatives they're being weighed against.
+        scanState = {
+          ids: agg.ids,
+          uncertain: agg.uncertain,
+          alternatives: agg.alternatives,
+          confidence: agg.confidence,
+          active: true,
+          finalized: agg.stable,
+        };
         renderScanResults();
-        if (res.picks >= 5) {
-          // Complete read — pin it, stop scanning, start watching for game start.
+        if (agg.stable) {
+          // Consensus locked — pin it, stop scanning, watch for game start.
           liveFilledSlots = res.filledSlots;
           liveFullAt = Date.now();
           liveGoneSince = 0;
@@ -768,18 +913,23 @@ async function liveLoop() {
           liveChecking = false;
           const scope =
             liveSurface === "window" ? "the League window" : "your screen";
+          const nMaybe = agg.uncertain.size;
           scanSetStatus(
-            `Champion select read ✓ — ${res.ids.length} champions pinned below. ` +
-              `Waiting for the game to start, then I’ll stop sharing ${scope}.`,
+            `Champion select read ✓ — ${agg.ids.length} champions pinned below` +
+              (nMaybe ? `, ${nMaybe} to double-check` : "") +
+              `. Waiting for the game to start, then I’ll stop sharing ${scope}.`,
           );
           scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
           return;
         }
         scanSetStatus(
-          `Reading champion select… ${res.picks}/5 picks locked, ${res.ids.length} champions so far.`,
+          agg.picksFilled >= 5
+            ? `All 5 picks in — confirming the read…`
+            : `Reading champion select… ${agg.picksFilled}/5 picks locked, ` +
+                `${agg.ids.length} champions so far.`,
         );
       } else {
-        scanSetStatus("Champion select found — waiting for champions to load…");
+        scanSetStatus("Champion select found — waiting for picks to lock in…");
       }
     }
   }
