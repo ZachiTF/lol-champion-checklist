@@ -297,7 +297,7 @@ function teardownScanWorker(disable) {
 // Run one frame through the worker; resolves the worker's message (or null on
 // timeout/failure so the caller can fall back). The buffer is cloned (not
 // transferred) so a fallback can still use it if the worker doesn't answer.
-function scanViaWorker(buf, w, h, cachedLayout, tight) {
+function scanViaWorker(buf, w, h, cachedClient, tight) {
   return new Promise((resolve) => {
     const id = scanReqId++;
     let done = false;
@@ -316,15 +316,26 @@ function scanViaWorker(buf, w, h, cachedLayout, tight) {
       buf,
       w,
       h,
-      layout: cachedLayout || null,
+      client: cachedClient || null,
       tight: !!tight,
     });
   });
 }
 
-// Locate + read a frame, off-thread when possible. Returns
-// { layout, ids, uncertain, picks, benchCount, filledSlots } or { layout:null }.
-async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
+// Lazily-built main-thread ARAM pipeline — the fallback when a Web Worker isn't
+// available (file://, blocked). Same stages the worker composes.
+let scanMainPipeline = null;
+function getScanPipeline() {
+  if (!scanMainPipeline) scanMainPipeline = pipelineForMode("aram");
+  return scanMainPipeline;
+}
+
+// Locate + read a frame through the modular pipeline, off-thread when possible.
+// `cachedClient` short-circuits the locate stage on a pixel-stable live frame.
+// Returns { layout(=client), ids, uncertain, picks, benchCount, filledSlots,
+// benchSlots, pickCircles } or { layout:null }. (The field is named `layout` for
+// back-compat with the live loop; it now carries the located ClientRect.)
+async function scanFrameAsync(buf, w, h, cachedClient, tight) {
   const worker = ensureScanWorker();
   if (worker) {
     if (!scanWorkerReady && scanWorkerReadyPromise) {
@@ -334,11 +345,11 @@ async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
       ]);
     }
     if (scanWorkerReady) {
-      const m = await scanViaWorker(buf, w, h, cachedLayout, tight);
+      const m = await scanViaWorker(buf, w, h, cachedClient, tight);
       if (m) {
-        if (!m.layout) return { layout: null };
+        if (!m.client) return { layout: null };
         return {
-          layout: m.layout,
+          layout: m.client,
           ids: m.ids,
           uncertain: new Set(m.uncertainIds),
           picks: m.picks,
@@ -351,21 +362,23 @@ async function scanFrameAsync(buf, w, h, cachedLayout, tight) {
       // worker failed/timed out — fall through to the main thread (buf is intact)
     }
   }
-  const layout = cachedLayout || locateForScan(buf, w, h);
-  if (!layout) return { layout: null };
-  const opts = tight ? { tight: true } : undefined;
-  const bench = readBench(buf, w, h, layout, iconHashes.byId, opts);
-  const picks = readPicks(buf, w, h, layout, iconHashes.byId, opts);
-  const { ids, uncertain } = combineReads(bench, picks);
+  const frame = { buf, W: w, H: h };
+  const ctx = {
+    iconHashById: iconHashes.byId,
+    tight: !!tight,
+    client: cachedClient || null,
+  };
+  const r = runFrameRead(getScanPipeline(), frame, ctx);
+  if (!r.client) return { layout: null };
   return {
-    layout,
-    ids,
-    uncertain,
-    picks: picks.picks,
-    benchCount: bench.ids.length,
-    filledSlots: bench.filledSlots,
-    benchSlots: bench.slots,
-    pickCircles: picks.circles,
+    layout: r.client,
+    ids: r.ids,
+    uncertain: r.uncertain,
+    picks: r.picks,
+    benchCount: r.benchCount,
+    filledSlots: r.filledSlots,
+    benchSlots: r.benchSlots,
+    pickCircles: r.pickCircles,
   };
 }
 

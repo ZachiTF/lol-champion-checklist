@@ -136,6 +136,84 @@ test("bench and circles together produce the full visible roster", () => {
   assert.equal(all.length, EXPECTED.length + EXPECTED_CIRCLES.length);
 });
 
+// ---- modular pipeline (Frame → ClientFinder → SlotProvider → IconMatcher) ----
+// Each stage is exercised in isolation, then the composed ARAM pipeline is pinned
+// to reproduce the direct reads above, and a stage swap is shown to still work.
+const frame = { buf, W, H };
+const ctx = { iconHashById };
+
+test("wholeFrameClient returns the whole frame as the client", () => {
+  assert.deepEqual(core.wholeFrameClient(frame, ctx), {
+    x: 0,
+    y: 0,
+    w: W,
+    h: H,
+  });
+});
+
+test("benchAnchoredClient locates a client rect and forwards bench hints", () => {
+  const c = core.benchAnchoredClient(frame, ctx);
+  assert.ok(c, "client should be located");
+  assert.ok(
+    c.hints && c.hints.bench,
+    "carries bench geometry forward as hints",
+  );
+  assert.ok(
+    c.x <= bench.center && bench.center <= c.x + c.w,
+    "encloses the bench",
+  );
+});
+
+test("aramSlots emits 10 bench spots + the 5 detected team circles", () => {
+  const c = core.benchAnchoredClient(frame, ctx);
+  const spots = core.aramSlots(frame, c, ctx);
+  assert.equal(spots.filter((s) => s.kind === "bench").length, 10);
+  assert.equal(spots.filter((s) => s.kind === "circle").length, 5);
+});
+
+test("ARAM pipeline reproduces the direct bench + circle reads exactly", () => {
+  const r = core.runFrameRead(core.pipelineForMode("aram"), frame, ctx);
+  assert.ok(r.client, "pipeline locates the client");
+  assert.deepEqual(r.ids.slice(0, r.benchCount), EXPECTED);
+  assert.deepEqual(r.ids.slice(r.benchCount), EXPECTED_CIRCLES);
+  assert.equal(r.picks, EXPECTED_CIRCLES.length);
+  assert.equal(r.benchSlots.length, 10);
+  assert.equal(r.pickCircles.length, 5);
+});
+
+test("swapping the ClientFinder (whole-frame) keeps the ARAM matcher working", () => {
+  // The fixture is a native-resolution client capture, so wholeFrameClient +
+  // calibrated slot placement should recover the same roster without a search.
+  const pipeline = core.pipelineForMode("aram", {
+    findClient: core.wholeFrameClient,
+  });
+  const r = core.runFrameRead(pipeline, frame, ctx);
+  assert.ok(r.client);
+  for (const id of EXPECTED) assert.ok(r.ids.includes(id), `missing ${id}`);
+  assert.equal(r.picks, EXPECTED_CIRCLES.length);
+});
+
+test("mode extension points lay out the right spot structure", () => {
+  const c = { x: 0, y: 0, w: W, h: H };
+  const arena = core.arenaSlots(frame, c, ctx);
+  assert.equal(arena.length, 96, "arena: a 12×8 central grid");
+  assert.ok(arena.every((s) => s.kind === "grid"));
+  const rift = core.riftSlots(frame, c, ctx);
+  assert.equal(
+    rift.filter((s) => s.kind === "ban").length,
+    10,
+    "5 bans per side",
+  );
+  assert.equal(
+    rift.filter((s) => s.kind === "circle").length,
+    10,
+    "5 picks per side",
+  );
+  assert.ok(
+    rift.some((s) => s.group === "blue") && rift.some((s) => s.group === "red"),
+  );
+});
+
 // ---- locate-stage robustness: a "full desktop" print screen ----
 // The pipeline must find the client anywhere in the frame and at any scale, not
 // just when the screenshot is cropped exactly to the client. Synthesize those

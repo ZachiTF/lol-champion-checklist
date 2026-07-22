@@ -425,11 +425,12 @@ function clientFromBench(bench) {
   const h = w / CLIENT_ASPECT;
   return { x: bench.center - w / 2, y: bench.cy - BENCH_CY_FRAC * h, w, h };
 }
-// The team-circle search region (column + vertical band), derived from the bench.
-function circleRegionFromBench(bench, W, H) {
-  const c = clientFromBench(bench);
+// The team-circle search region (column + vertical band) from a client rect and
+// the bench pitch. Split out from circleRegionFromBench so the modular slot
+// provider can build it from a trusted client rect (window-share path) too.
+function circleRegionFromClientRect(c, pitch, W, H) {
   const cx = c.x + CIRCLE_CX_FRAC * c.w;
-  const size = Math.round(bench.pitch * CIRCLE_SIZE_FRAC);
+  const size = Math.round(pitch * CIRCLE_SIZE_FRAC);
   return {
     xa: Math.max(0, Math.round(cx - size * 0.9)),
     xb: Math.min(W - 1, Math.round(cx + size * 0.9)),
@@ -439,6 +440,23 @@ function circleRegionFromBench(bench, W, H) {
     size,
     client: c,
   };
+}
+// The team-circle search region, derived from the bench (unchanged behavior).
+function circleRegionFromBench(bench, W, H) {
+  return circleRegionFromClientRect(clientFromBench(bench), bench.pitch, W, H);
+}
+// Calibrated bench geometry from a trusted client rect — the inverse of
+// clientFromBench, using the same measured fractions. Used by the window-share
+// path, where the shared surface IS the client so no content search is needed.
+function benchFromClientRect(c) {
+  const pitch = (c.w * BENCH_SPAN_FRAC) / 10;
+  const size = Math.round(pitch * ICON_TO_PITCH);
+  const x0 = c.x + c.w / 2 - 5 * pitch;
+  const cy = c.y + BENCH_CY_FRAC * c.h;
+  const slots = [];
+  for (let k = 0; k < 10; k++)
+    slots.push({ cx: x0 + pitch * (k + 0.5), cy, size });
+  return { pitch, size, slots };
 }
 
 // One-shot locate: bench + circle region + client rect. Returns null if no bench.
@@ -874,6 +892,274 @@ function aggregateResult(agg) {
   };
 }
 
+// ============================================================================
+// MODULAR PIPELINE — Frame → ClientFinder → SlotProvider → IconMatcher
+// ============================================================================
+// A champ-select read is three swappable stages, each a plain function you can
+// exchange and unit-test in isolation. The tuned primitives above (findBenchBar,
+// matchSlot, matchCircle, classify*, detectTeamCirclesIn) are the sub-functions
+// these stages compose — they stay individually exported and tested.
+//
+//   1. ClientFinder  (frame, ctx) -> ClientRect|null    WHERE is champ select?
+//   2. SlotProvider  (frame, client, ctx) -> Spot[]     WHERE should icons be?
+//   3. IconMatcher   (frame, spots, ctx) -> SpotMatch[] WHICH champion is there?
+//
+// The SlotProvider is where a game MODE lives (ARAM bench+circles, Arena grid,
+// Summoner's Rift bans + two team columns). The ClientFinder is capture-dependent
+// (whole-frame for a shared window; content-search for an arbitrary screenshot)
+// and mostly mode-independent. `ctx` carries { iconHashById, tight?, client? }.
+/**
+ * @typedef {{ buf: Uint8ClampedArray, W: number, H: number }} Frame
+ * @typedef {{ x:number, y:number, w:number, h:number, hints?:object }} ClientRect
+ * @typedef {{ kind:string, index:number, cx:number, cy:number, size:number, group?:string }} Spot
+ *   kind: "bench" | "circle" | "ban" | "grid"; `group` optionally tags a team/side.
+ * @typedef {{ spot:Spot, id:(string|null), verdict:("accept"|"maybe"|"reject"),
+ *   score:number, alts:string[], m:(SlotMatch|null) }} SpotMatch
+ * @typedef {(frame:Frame, ctx:object) => (ClientRect|null)} ClientFinder
+ * @typedef {(frame:Frame, client:ClientRect, ctx:object) => Spot[]} SlotProvider
+ * @typedef {(frame:Frame, spots:Spot[], ctx:object) => SpotMatch[]} IconMatcher
+ */
+
+// ---- Stage 1: ClientFinders ------------------------------------------------
+// Window/tab share: the shared surface IS the client, so it's the whole frame.
+// Trivial and mode-agnostic — the fast path a live capture usually hits.
+/** @type {ClientFinder} */
+function wholeFrameClient(frame) {
+  return { x: 0, y: 0, w: frame.W, h: frame.H };
+}
+// Arbitrary screenshot (ARAM): find the bench by content + periodicity and
+// reconstruct the client from it, forwarding the found geometry as hints so the
+// slot provider needn't re-search. Needs ctx.iconHashById.
+/** @type {ClientFinder} */
+function benchAnchoredClient(frame, ctx) {
+  const bench = findBenchBar(frame.buf, frame.W, frame.H, ctx.iconHashById);
+  if (!bench) return null;
+  const c = clientFromBench(bench);
+  const circleRegion = circleRegionFromBench(bench, frame.W, frame.H);
+  return { x: c.x, y: c.y, w: c.w, h: c.h, hints: { bench, circleRegion } };
+}
+
+// ---- Stage 2: SlotProviders (one per game MODE) ----------------------------
+// ARAM: up to 10 bench squares along the top + 5 team circles down the left.
+/** @type {SlotProvider} */
+function aramSlots(frame, client, ctx) {
+  const spots = [];
+  // Bench: exact slots from a searching client-finder's hints when present, else
+  // calibrated from the (trusted) client rect on the window-share path.
+  const bench =
+    (client.hints && client.hints.bench) || benchFromClientRect(client);
+  bench.slots.forEach((s, i) =>
+    spots.push({ kind: "bench", index: i, cx: s.cx, cy: s.cy, size: s.size }),
+  );
+  // Circles: detect the 5 rows within the search region, then emit their spots.
+  const region =
+    (client.hints && client.hints.circleRegion) ||
+    circleRegionFromClientRect(client, bench.pitch, frame.W, frame.H);
+  const circles =
+    detectTeamCirclesIn(frame.buf, frame.W, frame.H, region) || [];
+  circles.forEach((c, i) =>
+    spots.push({ kind: "circle", index: i, cx: c.cx, cy: c.cy, size: c.size }),
+  );
+  return spots;
+}
+
+// Arena (2v2v2v2): one central grid of every champion — no bench, no team
+// circles. Placeholder geometry showing how the mode plugs in; the fractions are
+// TODO(arena): measure them against a real Arena screenshot before wiring it up.
+const ARENA_GRID = { cols: 12, rows: 8, x: 0.2, y: 0.2, w: 0.6, h: 0.6 }; // TODO
+/** @type {SlotProvider} */
+function arenaSlots(frame, client) {
+  const g = ARENA_GRID;
+  const x0 = client.x + g.x * client.w;
+  const y0 = client.y + g.y * client.h;
+  const cw = (g.w * client.w) / g.cols;
+  const ch = (g.h * client.h) / g.rows;
+  const size = Math.round(Math.min(cw, ch) * 0.8);
+  const spots = [];
+  let i = 0;
+  for (let r = 0; r < g.rows; r++)
+    for (let c = 0; c < g.cols; c++)
+      spots.push({
+        kind: "grid",
+        index: i++,
+        cx: Math.round(x0 + (c + 0.5) * cw),
+        cy: Math.round(y0 + (r + 0.5) * ch),
+        size,
+      });
+  return spots;
+}
+
+// Summoner's Rift draft: 5 bans top-left + 5 bans top-right, and 5 team circles
+// down each side (blue left, red right), each tagged with a `group`. Placeholder
+// geometry — TODO(rift): measure all fractions against a real draft screenshot.
+const RIFT = {
+  banY: 0.06,
+  banPitch: 0.045,
+  banSize: 0.035,
+  banLeftX: 0.2,
+  banRightX: 0.8,
+  circleY0: 0.2,
+  circlePitch: 0.14,
+  circleSize: 0.05,
+  leftX: 0.04,
+  rightX: 0.96,
+}; // TODO measure
+/** @type {SlotProvider} */
+function riftSlots(frame, client) {
+  const px = (fx) => Math.round(client.x + fx * client.w);
+  const py = (fy) => Math.round(client.y + fy * client.h);
+  const spots = [];
+  let i = 0;
+  const banSize = Math.round(RIFT.banSize * client.w);
+  for (let k = 0; k < 5; k++) {
+    spots.push({
+      kind: "ban",
+      group: "blue",
+      index: i++,
+      cx: px(RIFT.banLeftX + k * RIFT.banPitch),
+      cy: py(RIFT.banY),
+      size: banSize,
+    });
+    spots.push({
+      kind: "ban",
+      group: "red",
+      index: i++,
+      cx: px(RIFT.banRightX - k * RIFT.banPitch),
+      cy: py(RIFT.banY),
+      size: banSize,
+    });
+  }
+  const cSize = Math.round(RIFT.circleSize * client.w);
+  for (let k = 0; k < 5; k++) {
+    const cy = py(RIFT.circleY0 + k * RIFT.circlePitch);
+    spots.push({
+      kind: "circle",
+      group: "blue",
+      index: i++,
+      cx: px(RIFT.leftX),
+      cy,
+      size: cSize,
+    });
+    spots.push({
+      kind: "circle",
+      group: "red",
+      index: i++,
+      cx: px(RIFT.rightX),
+      cy,
+      size: cSize,
+    });
+  }
+  return spots;
+}
+
+// ---- Stage 3: IconMatcher --------------------------------------------------
+// Reduce a raw SlotMatch + verdict into the stage's SpotMatch shape.
+function toSpotMatch(spot, m, verdict) {
+  return {
+    spot,
+    id: m ? m.id : null,
+    verdict,
+    score: m ? m.score : Infinity,
+    alts: m ? (m.alts || []).map((a) => a.id).filter((id) => id !== m.id) : [],
+    m,
+  };
+}
+// Perceptual matcher: square icons (bench/grid/ban) use the full-icon hashes and
+// classifyMatch; circular portraits use the center-crop hashes (matchCircle) and
+// classifyCircleMatch. Same tuned primitives, dispatched by spot kind.
+/** @type {IconMatcher} */
+function perceptualMatcher(frame, spots, ctx) {
+  const { buf, W, H } = frame;
+  const opts = ctx.tight ? { tight: true } : undefined;
+  return spots.map((spot) => {
+    if (spot.kind === "circle") {
+      const m = matchCircle(buf, W, H, spot, ctx.iconHashById, opts);
+      return toSpotMatch(spot, m, classifyCircleMatch(m));
+    }
+    const m = matchSlot(buf, W, H, spot, ctx.iconHashById, opts);
+    return toSpotMatch(spot, m, classifyMatch(m));
+  });
+}
+
+// ---- Pipeline + mode registry ----------------------------------------------
+/**
+ * @param {{ findClient:ClientFinder, provideSlots:SlotProvider, matchIcons:IconMatcher }} stages
+ */
+function createPipeline({ findClient, provideSlots, matchIcons }) {
+  return {
+    findClient,
+    provideSlots,
+    matchIcons,
+    // A cached ClientRect on ctx.client short-circuits the finder for fast live
+    // reads on a pixel-stable frame; provideSlots still re-runs (picks fill in).
+    run(frame, ctx) {
+      const c = (ctx && ctx.client) || findClient(frame, ctx);
+      if (!c) return { client: null, spots: [], matches: [] };
+      const spots = provideSlots(frame, c, ctx);
+      const matches = matchIcons(frame, spots, ctx);
+      return { client: c, spots, matches };
+    },
+  };
+}
+
+// Ready-made modes. Swap `provideSlots` to change game mode, `findClient` to
+// change how the client is located (e.g. wholeFrameClient for a shared window).
+const SCAN_MODES = {
+  aram: {
+    findClient: benchAnchoredClient,
+    provideSlots: aramSlots,
+    matchIcons: perceptualMatcher,
+  },
+  arena: {
+    findClient: wholeFrameClient,
+    provideSlots: arenaSlots,
+    matchIcons: perceptualMatcher,
+  },
+  rift: {
+    findClient: wholeFrameClient,
+    provideSlots: riftSlots,
+    matchIcons: perceptualMatcher,
+  },
+};
+function pipelineForMode(modeId, overrides) {
+  const mode = SCAN_MODES[modeId] || SCAN_MODES.aram;
+  return createPipeline({ ...mode, ...(overrides || {}) });
+}
+
+// Reduce a pipeline result into the app's read shape (deduped ids, uncertain set,
+// per-position records for the temporal consensus). Mirrors the old
+// readBench + readPicks + combineReads exactly: bench-first dedup, uncertain
+// carries from either source, filledSlots covers every non-reject bench slot.
+function runFrameRead(pipeline, frame, ctx) {
+  const { client, matches } = pipeline.run(frame, ctx);
+  if (!client) return { client: null };
+  const benchM = matches.filter((x) => x.spot.kind !== "circle");
+  const circleM = matches.filter((x) => x.spot.kind === "circle");
+  const ids = [];
+  const uncertain = new Set();
+  const filledSlots = [];
+  const take = (x) => {
+    if (x.verdict === "reject" || !x.m) return false;
+    if (!ids.includes(x.m.id)) ids.push(x.m.id);
+    if (x.verdict === "maybe") uncertain.add(x.m.id);
+    return true;
+  };
+  for (const x of benchM) if (take(x)) filledSlots.push(x.spot);
+  const benchCount = ids.length;
+  let picks = 0;
+  for (const x of circleM) if (take(x)) picks++;
+  return {
+    client,
+    ids,
+    uncertain,
+    benchCount,
+    picks,
+    filledSlots,
+    benchSlots: benchM.map((x) => ({ m: x.m, verdict: x.verdict })),
+    pickCircles: circleM.map((x) => ({ m: x.m, verdict: x.verdict })),
+  };
+}
+
 // Dual-use: expose the pure API to Node (tests) without disturbing the browser,
 // where these top-level declarations are already globals shared across scripts.
 if (typeof module !== "undefined" && module.exports) {
@@ -888,6 +1174,8 @@ if (typeof module !== "undefined" && module.exports) {
     locateLayout,
     clientFromBench,
     circleRegionFromBench,
+    circleRegionFromClientRect,
+    benchFromClientRect,
     matchSlot,
     classifyMatch,
     detectTeamCircles,
@@ -901,6 +1189,18 @@ if (typeof module !== "undefined" && module.exports) {
     aggregateFrame,
     aggregateResult,
     circleIconRect,
+    // Modular pipeline (Frame → ClientFinder → SlotProvider → IconMatcher)
+    wholeFrameClient,
+    benchAnchoredClient,
+    aramSlots,
+    arenaSlots,
+    riftSlots,
+    perceptualMatcher,
+    toSpotMatch,
+    createPipeline,
+    SCAN_MODES,
+    pipelineForMode,
+    runFrameRead,
     AGG_WINDOW,
     AGG_CONFIRM,
     SCAN_ACCEPT_COLOR,

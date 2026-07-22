@@ -6,8 +6,11 @@
 // page opened directly from a file:// path, where workers are blocked).
 importScripts("scan-core.js");
 
-// Champion hash map, rebuilt once from the serialized items the page sends.
+// Champion hash map, rebuilt once from the serialized items the page sends, plus
+// the ARAM pipeline that composes the pure stages (ClientFinder → SlotProvider →
+// IconMatcher) from scan-core.js.
 let byId = null;
+let pipeline = null;
 
 self.onmessage = (e) => {
   const m = e.data;
@@ -24,38 +27,40 @@ self.onmessage = (e) => {
         },
       ]),
     );
+    pipeline = pipelineForMode("aram");
     self.postMessage({ type: "ready" });
     return;
   }
 
   if (m.type === "scan") {
     if (!byId) {
-      self.postMessage({ type: "result", id: m.id, layout: null });
+      self.postMessage({ type: "result", id: m.id, client: null });
       return;
     }
-    const data = new Uint8ClampedArray(m.buf);
-    // Reuse a cached layout if the page passed one; else locate from scratch.
-    const layout = m.layout || locateLayout(data, m.w, m.h, byId);
-    if (!layout) {
-      self.postMessage({ type: "result", id: m.id, layout: null });
+    const frame = { buf: new Uint8ClampedArray(m.buf), W: m.w, H: m.h };
+    // A cached client (from a prior read) short-circuits the locate stage.
+    const ctx = {
+      iconHashById: byId,
+      tight: !!m.tight,
+      client: m.client || null,
+    };
+    const r = runFrameRead(pipeline, frame, ctx);
+    if (!r.client) {
+      self.postMessage({ type: "result", id: m.id, client: null });
       return;
     }
-    const opts = m.tight ? { tight: true } : undefined;
-    const bench = readBench(data, m.w, m.h, layout, byId, opts);
-    const picks = readPicks(data, m.w, m.h, layout, byId, opts);
-    const { ids, uncertain } = combineReads(bench, picks);
     self.postMessage({
       type: "result",
       id: m.id,
-      layout,
-      ids,
-      uncertainIds: [...uncertain],
-      benchCount: bench.ids.length,
-      picks: picks.picks,
-      filledSlots: bench.filledSlots,
+      client: r.client,
+      ids: r.ids,
+      uncertainIds: [...r.uncertain],
+      benchCount: r.benchCount,
+      picks: r.picks,
+      filledSlots: r.filledSlots,
       // Per-position matches so the main thread can vote across frames.
-      benchSlots: bench.slots,
-      pickCircles: picks.circles,
+      benchSlots: r.benchSlots,
+      pickCircles: r.pickCircles,
     });
   }
 };
