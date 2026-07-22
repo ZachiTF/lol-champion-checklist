@@ -686,7 +686,9 @@ async function handleScanFile(file) {
 // captured even when unfocused); when you share the whole SCREEN, "gone" is
 // ambiguous with alt-tabbing, so there we also require a generous timer.
 let liveStream = null;
-let liveVideo = null;
+let liveVideo = null; // frame source (kept live but hidden; the canvas is the preview)
+let livePreview = null; // <canvas> showing the live frame + focus overlay
+let liveFocus = null; // last read's boxes to stroke: { client, bench, circ }
 let liveTimer = null; // the single pending poll/watch timeout
 let liveTicker = null; // 250ms interval that renders the "next check in Ns" line
 let liveState = "idle"; // idle | watching | reading | complete
@@ -735,6 +737,8 @@ function stopLiveCapture() {
     liveVideo.srcObject = null;
     liveVideo = null;
   }
+  livePreview = null;
+  liveFocus = null;
   // Nothing is running anymore — clear the checklist so its spinner stops turning.
   scanStepStates = null;
   scanRenderSteps();
@@ -802,8 +806,57 @@ async function startLiveCapture() {
 // — it shows WHEN the next automatic check happens instead of asking for a click.)
 function startLiveTicker() {
   if (liveTicker) return;
-  liveTicker = setInterval(updateCadence, 250);
+  // ~4fps: matches the 5fps capture, so the canvas preview looks as smooth as the
+  // raw video while letting us stroke the focus overlay on top of each frame.
+  liveTicker = setInterval(() => {
+    updateCadence();
+    paintLivePreview();
+  }, 250);
   updateCadence();
+  paintLivePreview();
+}
+
+// Colors for the focus overlay, keyed by match verdict.
+const FOCUS_COLORS = {
+  accept: "#57e389",
+  maybe: "#ffcf6b",
+  reject: "rgba(255, 255, 255, 0.16)",
+};
+// Paint the current live frame into the preview canvas, then stroke what the
+// scanner is focusing on: the located client rectangle (dashed) + every bench and
+// team-circle box, colored by how confident the current match is. Everything is in
+// captured-frame pixels and the canvas shares the frame's resolution, so the boxes
+// line up with the video exactly (no letterbox math).
+function paintLivePreview() {
+  const cv = livePreview;
+  if (!cv || !liveVideo || !liveVideo.videoWidth) return;
+  const fw = liveVideo.videoWidth,
+    fh = liveVideo.videoHeight;
+  if (cv.width !== fw) cv.width = fw;
+  if (cv.height !== fh) cv.height = fh;
+  const g = cv.getContext("2d");
+  g.drawImage(liveVideo, 0, 0, fw, fh);
+  const f = liveFocus;
+  if (!f || !f.client) return;
+  const lw = Math.max(1.5, fw / 600); // stroke scales with frame size
+  // Located client area.
+  g.lineWidth = lw;
+  g.setLineDash([lw * 4, lw * 3]);
+  g.strokeStyle = "rgba(200, 155, 60, 0.85)";
+  g.strokeRect(f.client.x, f.client.y, f.client.w, f.client.h);
+  g.setLineDash([]);
+  // Per-spot boxes, colored by verdict (empty/reject slots stay faint).
+  const stroke = (list) => {
+    for (const p of list || []) {
+      const s = p.spot;
+      if (!s) continue;
+      g.strokeStyle = FOCUS_COLORS[p.verdict] || FOCUS_COLORS.reject;
+      g.lineWidth = p.verdict === "reject" ? lw : lw * 1.7;
+      g.strokeRect(s.cx - s.size / 2, s.cy - s.size / 2, s.size, s.size);
+    }
+  };
+  stroke(f.bench);
+  stroke(f.circ);
 }
 function updateCadence() {
   const el = scanPanelEl()?.querySelector(".scan-live-next");
@@ -878,12 +931,20 @@ async function liveLoop() {
       // champ select ended). Drop the cache + consensus and go back to watching.
       liveLayout = null;
       liveAgg = null;
+      liveFocus = null; // no champ select in frame — drop the overlay boxes
       liveState = "watching";
       scanSetStepStates(["done", "active", "pending", "pending"]);
       scanSetStatus("Watching for champion select…");
     } else {
       liveState = "reading";
       if (res.ids.length) liveLayout = res.layout; // cache a layout that reads
+      // Update the live focus overlay from this frame's located area + boxes.
+      liveFocus = {
+        client: res.layout,
+        bench: res.benchSlots,
+        circ: res.pickCircles,
+      };
+      paintLivePreview();
       // Fold this frame's per-position matches into the consensus, then read the
       // current aggregate — that (not the single frame) drives the UI.
       if (!liveAgg) liveAgg = createScanAggregator();
@@ -992,7 +1053,18 @@ function renderLiveControls(active) {
   if (!wrap) return;
   wrap.innerHTML = "";
   if (active && liveVideo) {
-    wrap.appendChild(liveVideo);
+    // The <video> is only a frame source now; the canvas is the visible preview
+    // (so we can stroke the focus overlay on top with exact pixel alignment).
+    liveVideo.className = "scan-live-source";
+    const stage = document.createElement("div");
+    stage.className = "scan-live-stage";
+    const preview = document.createElement("canvas");
+    preview.className = "scan-live-canvas";
+    stage.appendChild(liveVideo);
+    stage.appendChild(preview);
+    livePreview = preview;
+    wrap.appendChild(stage);
+    paintLivePreview();
     // Cadence line where the old "Scan now" button was: shows when the next
     // automatic check runs, so it's clear the scanner is working on its own.
     const next = document.createElement("span");

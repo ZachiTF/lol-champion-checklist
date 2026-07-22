@@ -1164,8 +1164,18 @@ function runFrameRead(pipeline, frame, ctx) {
     benchCount,
     picks,
     filledSlots,
-    benchSlots: benchM.map((x) => ({ m: x.m, verdict: x.verdict })),
-    pickCircles: circleM.map((x) => ({ m: x.m, verdict: x.verdict })),
+    // `spot` (box geometry) rides along for the live focus overlay; the temporal
+    // consensus only reads `m`/`verdict` and ignores it.
+    benchSlots: benchM.map((x) => ({
+      spot: x.spot,
+      m: x.m,
+      verdict: x.verdict,
+    })),
+    pickCircles: circleM.map((x) => ({
+      spot: x.spot,
+      m: x.m,
+      verdict: x.verdict,
+    })),
   };
 }
 

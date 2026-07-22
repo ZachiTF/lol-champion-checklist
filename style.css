@@ -1281,11 +1281,24 @@ body.summoner-search-hidden .wip-notice {
 .scan-live-start:hover {
   background: #d8ac4d;
 }
-.scan-live-video {
+.scan-live-stage {
+  position: relative;
+}
+/* The <video> is only a frame source now — kept live but out of view. */
+.scan-live-source {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Intrinsic size = the capture resolution; max-width/height fit it into the panel
+   while preserving aspect, so the strokes drawn in frame pixels stay aligned. */
+.scan-live-canvas {
   display: block;
-  width: 100%;
+  max-width: 100%;
   max-height: 220px;
-  object-fit: contain;
+  margin: 0 auto;
   background: #000;
   border-radius: 6px;
   border: 1px solid rgba(var(--accent-rgb), 0.3);
