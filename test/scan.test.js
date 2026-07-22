@@ -357,6 +357,76 @@ test("runFrameRead marks a champ uncertain if any position is a maybe", () => {
   assert.ok(r.uncertain.has("Ahri"), "uncertain carries from the circle read");
 });
 
+// ---- live "tight" search must stay aligned (fair icon-vs-icon) ----------------
+// Live reads reuse a cached geometry and collapse the per-slot search ("tight")
+// for speed. If that window is too narrow it compares a MISALIGNED crop against
+// the clean icon hashes — inflating distances and flipping the winner on live
+// frames only (the one-shot re-searches every time). These pin that the tight
+// read agrees with the full search on every CONFIDENT slot, across all fixtures.
+const TIGHT_FIXTURES = [
+  "aram-bench.png",
+  "aram-bench-2.png",
+  "aram-cooldown.png",
+];
+function decodeFixture(name) {
+  const p = PNG.sync.read(fs.readFileSync(path.join(FIX, name)));
+  return { buf: p.data, W: p.width, H: p.height };
+}
+
+test("tight bench matching agrees with the full search on every confident slot", () => {
+  let accepts = 0;
+  for (const name of TIGHT_FIXTURES) {
+    const fr = decodeFixture(name);
+    const bench = core.findBenchBar(fr.buf, fr.W, fr.H, iconHashById);
+    for (const slot of bench.slots) {
+      const full = core.matchSlot(fr.buf, fr.W, fr.H, slot, iconHashById);
+      if (core.classifyMatch(full) !== "accept") continue;
+      accepts++;
+      const tight = core.matchSlot(fr.buf, fr.W, fr.H, slot, iconHashById, {
+        tight: true,
+      });
+      assert.equal(
+        tight.id,
+        full.id,
+        `${name} slot flipped ${full.id}→${tight.id}`,
+      );
+      // Alignment stays fair enough that a confident champion is never demoted to
+      // an empty "reject" by the tight read (it may soften to "maybe").
+      assert.notEqual(
+        core.classifyMatch(tight),
+        "reject",
+        `${name} ${full.id} dropped by tight read (color ${tight.color.toFixed(
+          1,
+        )})`,
+      );
+    }
+  }
+  assert.ok(accepts >= 15, `expected many confident slots, saw ${accepts}`);
+});
+
+test("tight circle matching agrees with the full search on every confident pick", () => {
+  let accepts = 0;
+  for (const name of TIGHT_FIXTURES) {
+    const fr = decodeFixture(name);
+    const circs =
+      core.detectTeamCircles(fr.buf, fr.W, fr.H, iconHashById) || [];
+    for (const c of circs) {
+      const full = core.matchCircle(fr.buf, fr.W, fr.H, c, iconHashById);
+      if (core.classifyCircleMatch(full) !== "accept") continue;
+      accepts++;
+      const tight = core.matchCircle(fr.buf, fr.W, fr.H, c, iconHashById, {
+        tight: true,
+      });
+      assert.equal(
+        tight.id,
+        full.id,
+        `${name} pick flipped ${full.id}→${tight.id}`,
+      );
+    }
+  }
+  assert.ok(accepts >= 10, `expected many confident picks, saw ${accepts}`);
+});
+
 // ---- locate-stage robustness: a "full desktop" print screen ----
 // The pipeline must find the client anywhere in the frame and at any scale, not
 // just when the screenshot is cropped exactly to the client. Synthesize those

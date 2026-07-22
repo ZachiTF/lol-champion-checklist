@@ -26,6 +26,19 @@ const SCAN_MAYBE_HAM = 24;
 const SCAN_FILL_STD = 20; // luminance std above this = a filled (not empty) slot
 const SCAN_FILL_HAM = 22; // dHash must still roughly name a champion to rescue
 
+// "Tight" per-slot search window for fast live reads (geometry cached from a prior
+// full read). `off`/`step` bound the position search; `ds` are the icon-size
+// deltas tried. A pure ±2px position search with no size search (the old value)
+// compared a MISALIGNED crop against the clean icon hashes — unfair icon-vs-icon —
+// inflating distances 2-5x and occasionally flipping the winner on live frames.
+// A little size + position latitude restores alignment while staying far cheaper
+// than the full search. (Tunable per call via opts.tightConfig.)
+const TIGHT_SLOT = { off: 3, step: 3, ds: [-3, 0, 3] };
+// Same idea for team circles (size expressed as a fraction of the full-search
+// step). Circles are only 5 per frame and lock in (they don't swap like the
+// bench), so a slightly wider window here is cheap and eliminates pick flips.
+const TIGHT_CIRCLE = { off: 6, step: 3, dsFactor: 1.5 };
+
 // ---- shared JSDoc shapes for the scan pipeline ----
 /**
  * @typedef {{
@@ -473,9 +486,12 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
   const per = new Map();
   const s = slot.size || 52;
   const tight = opts && opts.tight;
-  const off = tight ? 2 : Math.max(6, Math.round(s * 0.22));
-  const step = tight ? 2 : Math.max(3, Math.round(off / 2));
-  const sizes = tight ? [s] : [s - 6, s - 3, s, s + 3, s + 6];
+  const tc = (opts && opts.tightConfig) || TIGHT_SLOT;
+  const off = tight ? tc.off : Math.max(6, Math.round(s * 0.22));
+  const step = tight ? tc.step : Math.max(3, Math.round(off / 2));
+  const sizes = tight
+    ? tc.ds.map((d) => s + d)
+    : [s - 6, s - 3, s, s + 3, s + 6];
   for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
@@ -660,10 +676,18 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   const s = circle.size;
   const f = s / 48;
   const tight = opts && opts.tight;
-  const off = tight ? 3 : Math.max(9, Math.round(9 * f));
-  const step = tight ? 3 : Math.max(3, Math.round(3 * f));
   const ds = Math.max(4, Math.round(4 * f));
-  const sizes = tight ? [s] : [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds];
+  // Tight (cached-geometry) search still needs SOME size latitude — a fixed size
+  // compared a misaligned crop against the icons' center-crops, inflating circle
+  // distances (~16→21) and flipping picks. `dsT` is a smaller size step than the
+  // full search so it stays cheap. (Tunable via opts.tightConfig.)
+  const tc = (opts && opts.tightConfig) || TIGHT_CIRCLE;
+  const dsT = Math.max(3, Math.round(tc.dsFactor * ds));
+  const off = tight ? tc.off : Math.max(9, Math.round(9 * f));
+  const step = tight ? tc.step : Math.max(3, Math.round(3 * f));
+  const sizes = tight
+    ? [s - dsT, s, s + dsT]
+    : [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds];
   for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
