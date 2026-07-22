@@ -501,17 +501,11 @@ function renderChampions() {
     const filterCount = document.createElement("div");
     filterCount.className = "filter-count";
     filterCount.textContent = `Showing ${filteredChampions.length} of ${champions.length} champions`;
-    filterCount.style.marginBottom = "12px";
-    filterCount.style.fontSize = "0.9em";
-    filterCount.style.opacity = "0.7";
     if (filteredChampions.length < champions.length) {
       grid.appendChild(filterCount);
     }
 
     filteredChampions.forEach((champ) => {
-      if (!(champ.id in progress)) {
-        progress[champ.id] = false;
-      }
       grid.appendChild(createChampionCard(champ));
     });
   } else {
@@ -574,9 +568,6 @@ function renderChampions() {
       filterGrid.className = "champion-grid-region";
 
       applyViewOptions(filterChampions).forEach((champ) => {
-        if (!(champ.id in progress)) {
-          progress[champ.id] = false;
-        }
         filterGrid.appendChild(createChampionCard(champ));
       });
 
@@ -585,7 +576,6 @@ function renderChampions() {
     });
   }
 
-  saveState();
   updateProgressText();
 }
 

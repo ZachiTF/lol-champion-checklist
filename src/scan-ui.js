@@ -616,17 +616,7 @@ function scanMiniChip(champ, kind) {
   chip.appendChild(img);
   chip.appendChild(name);
   chip.onclick = () => {
-    const progress = getProgress();
-    const nowDone = !progress[champ.id];
-    const key = clearedTimestampKey(champ.id);
-    if (nowDone) {
-      progress[champ.id] =
-        clearedTimestamps.get(key) || new Date().toISOString();
-      clearedTimestamps.delete(key);
-    } else {
-      clearedTimestamps.set(key, progress[champ.id]);
-      progress[champ.id] = false;
-    }
+    const nowDone = toggleChampionDone(champ.id);
     syncChampionCardState(champ.id, nowDone);
     saveState();
     updateProgressText();

@@ -17,7 +17,10 @@
     <link rel="stylesheet" href="style.css" />
   </head>
 
-  <body>
+  <!-- Summoner search + WIP notice are hidden by default so they don't flash on
+       load before main.js reads the toggle (opt-in via 🔍). The class is removed
+       at runtime only for users who enabled it. -->
+  <body class="summoner-search-hidden">
     <div id="theme-switcher"></div>
 
     <header class="page-header">
@@ -57,7 +60,10 @@
         placeholder="Summoner name #EUW"
         autocomplete="off"
       />
-      <button id="arena-god-btn">Import Arena God</button>
+      <!-- Parked: the Riot API can't expose Arena God progress (see .wip-notice).
+           Hidden until we surface some other useful challenge stat from the API.
+           The import wiring in src/riot-api.js is kept intact for that. -->
+      <button id="arena-god-btn" hidden>Import Arena God</button>
       <span id="challenge-import-status"></span>
     </div>
 

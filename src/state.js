@@ -1,5 +1,25 @@
 // Core state: persistence, page/progress model, filter + sort state, migrations.
 
+// --- TYPES ---
+// Shared JSDoc shapes for the persisted model. These document intent and give
+// editors hover/completion without a build step; `// @ts-check` is intentionally
+// NOT enabled (globals live across classic scripts, which would flag as undefined).
+/**
+ * @typedef {(string|false)} ProgressValue An ISO-8601 timestamp string of when a
+ *   champion was marked done, or `false`. Never-marked champions are simply absent.
+ * @typedef {Object<string, ProgressValue>} PageProgress Champion id → completion value.
+ * @typedef {{ name: string, progress: PageProgress, color: string }} Page
+ * @typedef {{ activePage: (string|null), pages: Object<string, Page> }} AppState
+ * @typedef {{
+ *   search: string,
+ *   globetrotter: string[],
+ *   harmony: string[],
+ *   hideCompleted: boolean,
+ *   sortKey: ("name"|"done"|"recent"),
+ *   sortDir: ("asc"|"desc")
+ * }} FilterState
+ */
+
 // --- CONFIG ---
 const LANG = "en_US";
 const STORAGE_KEY = "lol_pages";
@@ -9,6 +29,7 @@ let CHAMPION_JSON_URL = null;
 let CHAMPION_ICON_BASE = null;
 
 // --- STATE ---
+/** @type {AppState} */
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
   activePage: null,
   pages: {},
@@ -17,6 +38,10 @@ let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
 // Progress values: ISO timestamp string when done (records *when* the champion
 // was marked), false when not done. Truthiness checks keep working either way.
 // Legacy data stored `true`; migrate it in place by stamping the current date.
+/**
+ * @param {Page} page
+ * @returns {boolean} whether any value was migrated (caller persists if so)
+ */
 function migrateProgressTimestamps(page) {
   if (!page || typeof page.progress !== "object" || page.progress === null) {
     return false;
@@ -55,6 +80,7 @@ let champions = [];
 // GLOBETROTTER_FILTERS and HARMONY_FILTERS
 
 // Filter state - now supports multiple selections per category
+/** @type {FilterState} */
 let filterState = {
   search: "",
   globetrotter: [], // Multiple globetrotter filters (regions)
@@ -145,7 +171,31 @@ function createPage(name) {
   saveState();
 }
 
+/** @returns {PageProgress} the active page's progress map (empty if no page) */
 function getProgress() {
   const page = state.pages[state.activePage];
   return page ? page.progress : {};
+}
+
+// Toggle one champion's done state on the active page, preserving its original
+// completion timestamp across an accidental off→on (see clearedTimestamps).
+// Callers own the follow-up (persist + re-render); this only mutates progress.
+/**
+ * @param {string} champId
+ * @returns {boolean} the champion's new done state
+ */
+function toggleChampionDone(champId) {
+  const progress = getProgress();
+  const nowDone = !progress[champId];
+  const key = clearedTimestampKey(champId);
+  if (nowDone) {
+    // Re-marking: reuse the timestamp from before it was toggled off, so an
+    // accidental off/on doesn't wipe the original completion date.
+    progress[champId] = clearedTimestamps.get(key) || new Date().toISOString();
+    clearedTimestamps.delete(key);
+  } else {
+    clearedTimestamps.set(key, progress[champId]);
+    progress[champId] = false;
+  }
+  return nowDone;
 }

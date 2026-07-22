@@ -26,6 +26,21 @@ const SCAN_MAYBE_HAM = 24;
 const SCAN_FILL_STD = 20; // luminance std above this = a filled (not empty) slot
 const SCAN_FILL_HAM = 22; // dHash must still roughly name a champion to rescue
 
+// ---- shared JSDoc shapes for the scan pipeline ----
+/**
+ * @typedef {{
+ *   h: bigint,      // 64-bit dHash of the full square icon (bench match)
+ *   sig: number[],  // 27-dim color signature of the full icon
+ *   hC: bigint,     // dHash of the center-crop (team-circle match)
+ *   sigC: number[]  // color signature of the center-crop
+ * }} IconHash
+ * @typedef {Map<string, IconHash>} IconHashById champion id → its hashes
+ * @typedef {{ id: string, ham: number, color: number, score: number,
+ *   alts?: SlotMatch[], fill?: number }} SlotMatch A ranked champion match at
+ *   one slot: `ham` = dHash Hamming distance, `color` = color-signature distance,
+ *   `score` = combined rank, `fill` = slot luminance std (occupancy).
+ */
+
 // ---- pixel helpers over a flat RGBA buffer (area-averaged downscaling) ----
 function pxLum(buf, W, x, y) {
   const i = (y * W + x) * 4;
@@ -435,10 +450,18 @@ function locateLayout(buf, W, H, iconHashById) {
 }
 
 // For one slot, search offsets/sizes around the detected slot size and return the
-// best champion match. `iconHashById` is Map(champId -> { h:BigInt, sig:[27] }).
-// `opts.tight` collapses the search to a tiny window — for live capture, where the
-// geometry is already locked from a prior read and the frame is pixel-stable, this
-// is ~45x fewer candidate crops (dropping a poll from ~1.5s to tens of ms).
+// best champion match. `opts.tight` collapses the search to a tiny window — for
+// live capture, where the geometry is already locked from a prior read and the
+// frame is pixel-stable, this is ~45x fewer candidate crops (dropping a poll from
+// ~1.5s to tens of ms).
+/**
+ * @param {Uint8ClampedArray} buf flat RGBA pixel buffer
+ * @param {number} W @param {number} H buffer dimensions
+ * @param {{ cx: number, cy: number, size?: number }} slot slot center + icon size
+ * @param {IconHashById} iconHashById
+ * @param {{ tight?: boolean }} [opts]
+ * @returns {SlotMatch|null} best match (with `.alts` runners-up), or null
+ */
 function matchSlot(buf, W, H, slot, iconHashById, opts) {
   // Keep the best score seen per champion id across the whole local search, so we
   // can return not just the winner but the runner-up champions (best.alts). The

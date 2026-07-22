@@ -19,7 +19,7 @@
 .challenge-import select {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid #c89b3c;
+  border: 1px solid var(--accent);
   font-size: 0.95em;
   background: var(--card-bg);
   color: var(--fg);
@@ -30,7 +30,7 @@
 }
 .region-note {
   font-size: 0.75em;
-  color: #c89b3c;
+  color: var(--accent);
   opacity: 0.85;
   white-space: nowrap;
 }
@@ -38,7 +38,7 @@
 .challenge-import input[type="text"] {
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid #c89b3c;
+  border: 1px solid var(--accent);
   font-size: 1em;
   background: var(--card-bg);
   color: var(--fg);
@@ -134,14 +134,14 @@
 .wip-notice {
   background: #ffe7b3;
   color: #7a4c00;
-  border: 1px solid #c89b3c;
+  border: 1px solid var(--accent);
   border-radius: 6px;
   padding: 10px 18px;
   margin: 18px auto 10px auto;
   text-align: center;
   font-size: 1.08em;
   max-width: 600px;
-  box-shadow: 0 2px 8px 0 rgba(200, 155, 60, 0.07);
+  box-shadow: 0 2px 8px 0 rgba(var(--accent-rgb), 0.07);
 }
 
 @media (max-width: 600px) {
@@ -177,7 +177,7 @@
   padding: 8px 18px;
   border-radius: 6px;
   border: none;
-  background: #c89b3c;
+  background: var(--accent);
   color: #0b0e14;
   font-weight: bold;
   font-size: 1em;
@@ -192,7 +192,7 @@
 .challenge-import #challenge-import-status {
   margin-left: 10px;
   font-size: 0.95em;
-  color: #c89b3c;
+  color: var(--accent);
 }
 
 /* Theme variables */
@@ -230,6 +230,11 @@ body {
     -apple-system,
     BlinkMacSystemFont,
     sans-serif;
+  /* Brand gold accent — theme-independent. Two forms of the SAME color:
+     --accent for solid fills/borders, --accent-rgb to build translucent
+     rgba(var(--accent-rgb), a) overlays (c8,9b,3c === 200,155,60). */
+  --accent: #c89b3c;
+  --accent-rgb: 200, 155, 60;
   background: var(--bg, #0b0e14);
   color: var(--fg, #e6e6e6);
   margin: 0;
@@ -246,10 +251,10 @@ body {
   margin: -20px -20px 20px -20px;
   background: linear-gradient(
     135deg,
-    rgba(200, 155, 60, 0.1) 0%,
-    rgba(200, 155, 60, 0.05) 100%
+    rgba(var(--accent-rgb), 0.1) 0%,
+    rgba(var(--accent-rgb), 0.05) 100%
   );
-  border-bottom: 2px solid rgba(200, 155, 60, 0.3);
+  border-bottom: 2px solid rgba(var(--accent-rgb), 0.3);
   position: relative;
 }
 
@@ -261,7 +266,7 @@ body {
   transform: translateX(-50%);
   width: 100px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, #c89b3c, transparent);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
 }
 
 h1 {
@@ -273,7 +278,7 @@ h1 {
 }
 
 h1 .highlight {
-  color: #c89b3c;
+  color: var(--accent);
   font-weight: 800;
 }
 
@@ -281,7 +286,7 @@ h1 .highlight {
   margin: 0 0 12px 0;
   font-size: 18px;
   font-weight: 600;
-  color: rgba(200, 155, 60, 0.95);
+  color: rgba(var(--accent-rgb), 0.95);
   letter-spacing: 0.5px;
   text-align: center;
 }
@@ -299,18 +304,23 @@ h1 .highlight {
   border-radius: 7px;
   overflow: hidden;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(200, 155, 60, 0.25);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
 }
 
 .progress-bar {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #c89b3c 0%, #f0e6d2 50%, #c89b3c 100%);
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    #f0e6d2 50%,
+    var(--accent) 100%
+  );
   background-size: 200% 100%;
   border-radius: 7px;
   transition: width 0.5s ease;
   box-shadow:
-    0 0 12px rgba(200, 155, 60, 0.7),
+    0 0 12px rgba(var(--accent-rgb), 0.7),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
@@ -346,7 +356,7 @@ body.animations-enabled .progress-bar {
 .guide-toggle,
 .scan-toggle {
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   border-radius: 8px;
   width: 40px;
   height: 40px;
@@ -367,9 +377,9 @@ body.animations-enabled .progress-bar {
 .guide-toggle:hover,
 .scan-toggle:hover {
   background: var(--card-hover, #1f2633);
-  border-color: rgba(200, 155, 60, 0.5);
+  border-color: rgba(var(--accent-rgb), 0.5);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(200, 155, 60, 0.2);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.2);
 }
 
 .animation-toggle.disabled,
@@ -388,7 +398,7 @@ body.animations-enabled .progress-bar {
 }
 
 .settings-toggle.open {
-  border-color: rgba(200, 155, 60, 0.6);
+  border-color: rgba(var(--accent-rgb), 0.6);
   transform: rotate(90deg);
 }
 
@@ -481,7 +491,7 @@ body.summoner-search-hidden .wip-notice {
   height: 4px;
 }
 #tabs-bar::-webkit-scrollbar-thumb {
-  background: rgba(200, 155, 60, 0.3);
+  background: rgba(var(--accent-rgb), 0.3);
   border-radius: 2px;
 }
 
@@ -527,7 +537,7 @@ body.summoner-search-hidden .wip-notice {
 .tab-menu-btn {
   flex-shrink: 0;
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   border-radius: 8px 8px 0 0;
   border-bottom: none;
   width: 38px;
@@ -544,12 +554,12 @@ body.summoner-search-hidden .wip-notice {
 
 .tab-menu-btn:hover {
   background: var(--card-hover, #1f2633);
-  border-color: rgba(200, 155, 60, 0.6);
+  border-color: rgba(var(--accent-rgb), 0.6);
 }
 
 .tab-menu-btn[aria-expanded="true"] {
   background: var(--card-hover, #1f2633);
-  border-color: rgba(200, 155, 60, 0.7);
+  border-color: rgba(var(--accent-rgb), 0.7);
 }
 
 .tab-menu-btn.hidden {
@@ -566,7 +576,7 @@ body.summoner-search-hidden .wip-notice {
   min-width: 240px;
   max-width: calc(100vw - 16px);
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 6px 0;
@@ -585,8 +595,8 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: rgba(200, 155, 60, 0.9);
-  border-bottom: 1px solid rgba(200, 155, 60, 0.2);
+  color: rgba(var(--accent-rgb), 0.9);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.2);
   margin-bottom: 4px;
   display: flex;
   align-items: center;
@@ -631,7 +641,7 @@ body.summoner-search-hidden .wip-notice {
 
 .tab-actions-menu .menu-item:hover,
 .tab-actions-menu .menu-item:focus-visible {
-  background: rgba(200, 155, 60, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   outline: none;
 }
 
@@ -700,7 +710,7 @@ body.summoner-search-hidden .wip-notice {
   border-radius: 8px;
   align-items: center;
   flex-wrap: wrap;
-  border: 1px solid rgba(200, 155, 60, 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
 }
 
 .search-bar-wrapper {
@@ -717,7 +727,7 @@ body.summoner-search-hidden .wip-notice {
   max-width: 340px;
   padding: 8px 32px 8px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   font-size: 0.95em;
   background: var(--bg);
   color: var(--fg);
@@ -730,7 +740,7 @@ body.summoner-search-hidden .wip-notice {
   top: 50%;
   transform: translateY(-50%);
   font-size: 1.1em;
-  color: #c89b3c;
+  color: var(--accent);
   background: none;
   border: none;
   cursor: pointer;
@@ -749,13 +759,13 @@ body.summoner-search-hidden .wip-notice {
 
 .filter-bar input[type="text"]:focus {
   outline: none;
-  border-color: #c89b3c;
+  border-color: var(--accent);
 }
 
 .filter-bar select {
   padding: 8px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   font-size: 0.95em;
   background: var(--bg);
   color: var(--fg);
@@ -766,7 +776,7 @@ body.summoner-search-hidden .wip-notice {
 
 .filter-bar select:focus {
   outline: none;
-  border-color: #c89b3c;
+  border-color: var(--accent);
 }
 
 .filter-badge {
@@ -788,18 +798,18 @@ body.summoner-search-hidden .wip-notice {
   border-color: #5faee3;
 }
 .filter-badge-property {
-  background: rgba(200, 155, 60, 0.15);
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
 }
 .filter-badge-property:hover {
-  background: rgba(200, 155, 60, 0.25);
-  border-color: #c89b3c;
+  background: rgba(var(--accent-rgb), 0.25);
+  border-color: var(--accent);
 }
 
 .filter-toggle {
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   background: var(--bg);
   color: var(--fg);
   font-size: 0.95em;
@@ -809,15 +819,15 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .filter-toggle:hover {
-  border-color: #c89b3c;
+  border-color: var(--accent);
 }
 
 /* No font-weight change here: a bolder label widens the button and
    shifts its neighbors. */
 .filter-toggle.active {
-  background: rgba(200, 155, 60, 0.2);
-  border-color: #c89b3c;
-  color: #c89b3c;
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .filter-toggle.sort-dir {
@@ -885,6 +895,12 @@ body.summoner-search-hidden .wip-notice {
   margin-bottom: 0;
 }
 
+.filter-count {
+  margin-bottom: 12px;
+  font-size: 0.9em;
+  opacity: 0.7;
+}
+
 .filter-badge-label {
   font-weight: 500;
 }
@@ -902,7 +918,7 @@ body.summoner-search-hidden .wip-notice {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(200, 155, 60, 0.3);
+  background: rgba(var(--accent-rgb), 0.3);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
@@ -910,7 +926,7 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .filter-badge-remove:hover {
-  background: rgba(200, 155, 60, 0.6);
+  background: rgba(var(--accent-rgb), 0.6);
 }
 
 /* Champions Grid */
@@ -934,7 +950,7 @@ body.summoner-search-hidden .wip-notice {
   padding: 16px;
   background: var(--card-bg, #151a23);
   border-radius: 8px;
-  border: 1px solid rgba(200, 155, 60, 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
 }
 
 @media (max-width: 768px) {
@@ -972,7 +988,7 @@ body.summoner-search-hidden .wip-notice {
   padding: 10px 12px;
   background: var(--card-bg, #151a23);
   color: var(--fg, #e6e6e6);
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-size: 0.85em;
@@ -1000,7 +1016,7 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: #c89b3c;
+  color: var(--accent);
 }
 
 .champion-tooltip .tooltip-region {
@@ -1030,7 +1046,7 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .region-count.complete {
-  color: #c89b3c;
+  color: var(--accent);
   opacity: 1;
   font-weight: 600;
 }
@@ -1049,9 +1065,9 @@ body.summoner-search-hidden .wip-notice {
   margin-bottom: 20px;
   padding: 16px;
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.45);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(200, 155, 60, 0.08);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 .scan-header {
   display: flex;
@@ -1061,7 +1077,7 @@ body.summoner-search-hidden .wip-notice {
 }
 .scan-title {
   font-weight: 700;
-  color: #c89b3c;
+  color: var(--accent);
   letter-spacing: 0.4px;
 }
 .scan-count {
@@ -1076,7 +1092,7 @@ body.summoner-search-hidden .wip-notice {
 .scan-action {
   margin-left: auto;
   background: transparent;
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   color: inherit;
   border-radius: 6px;
   padding: 4px 10px;
@@ -1084,7 +1100,7 @@ body.summoner-search-hidden .wip-notice {
   font-size: 0.85em;
 }
 .scan-action:hover {
-  border-color: rgba(200, 155, 60, 0.8);
+  border-color: rgba(var(--accent-rgb), 0.8);
 }
 .scan-clear {
   margin-left: 0;
@@ -1094,7 +1110,7 @@ body.summoner-search-hidden .wip-notice {
 }
 /* Uncertain matches: dim + a "?" corner marker so they invite a quick check. */
 .champion.scan-uncertain {
-  outline: 1px dashed rgba(200, 155, 60, 0.6);
+  outline: 1px dashed rgba(var(--accent-rgb), 0.6);
   outline-offset: -1px;
 }
 .champion.scan-uncertain::after {
@@ -1104,7 +1120,7 @@ body.summoner-search-hidden .wip-notice {
   right: 6px;
   font-weight: 700;
   font-size: 0.8em;
-  color: #c89b3c;
+  color: var(--accent);
 }
 .champion.scan-uncertain {
   position: relative;
@@ -1115,7 +1131,7 @@ body.summoner-search-hidden .wip-notice {
 .scan-uncertain-list {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px dashed rgba(200, 155, 60, 0.3);
+  border-top: 1px dashed rgba(var(--accent-rgb), 0.3);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1147,15 +1163,15 @@ body.summoner-search-hidden .wip-notice {
   gap: 6px;
   padding: 3px 8px 3px 3px;
   border-radius: 999px;
-  border: 1px solid rgba(200, 155, 60, 0.35);
-  background: rgba(200, 155, 60, 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.06);
   color: inherit;
   cursor: pointer;
   font-size: 0.85em;
   line-height: 1.2;
 }
 .scan-chip:hover {
-  border-color: rgba(200, 155, 60, 0.75);
+  border-color: rgba(var(--accent-rgb), 0.75);
 }
 .scan-chip img {
   width: 22px;
@@ -1164,7 +1180,7 @@ body.summoner-search-hidden .wip-notice {
   object-fit: cover;
 }
 .scan-chip-best {
-  border-color: rgba(200, 155, 60, 0.7);
+  border-color: rgba(var(--accent-rgb), 0.7);
   font-weight: 600;
 }
 .scan-chip-alt {
@@ -1196,17 +1212,17 @@ body.summoner-search-hidden .wip-notice {
   padding: 24px;
   background: var(--card-bg, #151a23);
   color: var(--fg, #e6e6e6);
-  border: 1px solid rgba(200, 155, 60, 0.5);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 .scan-overlay-box.dragover {
-  border-color: #c89b3c;
-  box-shadow: 0 0 0 2px rgba(200, 155, 60, 0.5);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5);
 }
 .scan-overlay-box h3 {
   margin: 0 0 10px;
-  color: #c89b3c;
+  color: var(--accent);
 }
 .scan-overlay-box p {
   margin: 0 0 14px;
@@ -1249,11 +1265,11 @@ body.summoner-search-hidden .wip-notice {
 .scan-live {
   margin: 0 0 14px;
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(200, 155, 60, 0.2);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 .scan-live-start {
   width: 100%;
-  background: #c89b3c;
+  background: var(--accent);
   color: #10131a;
   border: none;
   border-radius: 6px;
@@ -1272,7 +1288,7 @@ body.summoner-search-hidden .wip-notice {
   object-fit: contain;
   background: #000;
   border-radius: 6px;
-  border: 1px solid rgba(200, 155, 60, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 .scan-live-row {
   display: flex;
@@ -1297,13 +1313,13 @@ body.summoner-search-hidden .wip-notice {
   padding: 16px;
   background: var(--card-bg, #151a23);
   color: var(--fg, #e6e6e6);
-  border: 1px solid rgba(200, 155, 60, 0.45);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(200, 155, 60, 0.08);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 .scan-panel.dragover {
-  border-color: #c89b3c;
-  box-shadow: 0 0 0 2px rgba(200, 155, 60, 0.5);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5);
 }
 .scan-panel-head {
   display: flex;
@@ -1313,7 +1329,7 @@ body.summoner-search-hidden .wip-notice {
 }
 .scan-panel-title {
   font-weight: 700;
-  color: #c89b3c;
+  color: var(--accent);
   letter-spacing: 0.4px;
 }
 .scan-panel-close {
@@ -1339,9 +1355,9 @@ body.summoner-search-hidden .wip-notice {
   font: inherit;
   font-size: 0.9em;
   padding: 0 4px;
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 4px;
-  background: rgba(200, 155, 60, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .scan-sources {
   margin-bottom: 4px;
@@ -1383,11 +1399,11 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 700;
 }
 .scan-step-pending .scan-step-mark {
-  border: 2px solid rgba(200, 155, 60, 0.35);
+  border: 2px solid rgba(var(--accent-rgb), 0.35);
 }
 .scan-step-active .scan-step-mark {
-  border: 2px solid rgba(200, 155, 60, 0.3);
-  border-top-color: #c89b3c;
+  border: 2px solid rgba(var(--accent-rgb), 0.3);
+  border-top-color: var(--accent);
   animation: scan-spin 0.7s linear infinite;
 }
 .scan-step-done .scan-step-mark {
@@ -1430,7 +1446,7 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .champion:focus-visible {
-  outline: 2px solid #c89b3c;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1460,7 +1476,7 @@ body.summoner-search-hidden .wip-notice {
   margin-top: 24px;
   padding: 16px 18px 14px;
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
   border-radius: 8px;
 }
 
@@ -1478,7 +1494,7 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
-  color: rgba(200, 155, 60, 0.9);
+  color: rgba(var(--accent-rgb), 0.9);
 }
 
 .history-summary {
@@ -1631,7 +1647,7 @@ body.summoner-search-hidden .wip-notice {
   max-width: 260px;
   padding: 8px 12px;
   background: var(--card-bg, #151a23);
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-size: 0.85em;
@@ -1699,27 +1715,27 @@ body.summoner-search-hidden .wip-notice {
   font-weight: 600;
   letter-spacing: 0.3px;
   text-align: center;
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.4),
-    0 0 16px rgba(200, 155, 60, 0.25);
+    0 0 16px rgba(var(--accent-rgb), 0.25);
   animation: banner-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
 /* Monochrome (starting-letter) cheer — gold accent */
 .achievement-banner.letter {
-  border-color: rgba(200, 155, 60, 0.6);
+  border-color: rgba(var(--accent-rgb), 0.6);
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(200, 155, 60, 0.4);
+    0 0 20px rgba(var(--accent-rgb), 0.4);
 }
 
 /* Globetrotter region completion — strong gold accent + crest */
 .achievement-banner.region {
-  border-color: #c89b3c;
+  border-color: var(--accent);
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.4),
-    0 0 26px rgba(200, 155, 60, 0.55);
+    0 0 26px rgba(var(--accent-rgb), 0.55);
 }
 
 .achievement-banner .banner-crest {
@@ -1739,7 +1755,7 @@ body.summoner-search-hidden .wip-notice {
       border-box;
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.45),
-    0 0 24px rgba(200, 155, 60, 0.35);
+    0 0 24px rgba(var(--accent-rgb), 0.35);
 }
 
 .achievement-banner.leaving {
@@ -1783,15 +1799,15 @@ body.summoner-search-hidden .wip-notice {
   background: var(--card-bg, #151a23);
   color: var(--fg, #e6e6e6);
   font-size: 14px;
-  border: 1px solid rgba(200, 155, 60, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
   animation: undo-in 0.3s ease;
 }
 
 .undo-banner .undo-btn {
-  border: 1px solid #c89b3c;
-  background: rgba(200, 155, 60, 0.15);
-  color: #c89b3c;
+  border: 1px solid var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
   font-weight: 700;
   font-size: 13px;
   padding: 6px 14px;
@@ -1802,7 +1818,7 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .undo-banner .undo-btn:hover {
-  background: rgba(200, 155, 60, 0.3);
+  background: rgba(var(--accent-rgb), 0.3);
 }
 
 .undo-banner.leaving {
@@ -1863,7 +1879,7 @@ body.summoner-search-hidden .wip-notice {
 .page-footer {
   margin: 40px auto 24px;
   padding: 20px 16px 0;
-  border-top: 1px solid var(--hairline, rgba(200, 155, 60, 0.2));
+  border-top: 1px solid var(--hairline, rgba(var(--accent-rgb), 0.2));
   text-align: center;
   font-size: 0.9em;
   color: var(--muted-fg, rgba(230, 230, 230, 0.6));
@@ -1875,7 +1891,7 @@ body.summoner-search-hidden .wip-notice {
   color: #e0567a;
 }
 .footer-links a {
-  color: #c89b3c;
+  color: var(--accent);
   text-decoration: none;
 }
 .footer-links a:hover {

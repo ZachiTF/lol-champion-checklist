@@ -276,18 +276,7 @@ function createChampionCard(champ) {
       return;
     }
     hideChampionTooltip();
-    const nowDone = !progress[champ.id];
-    const key = clearedTimestampKey(champ.id);
-    if (nowDone) {
-      // Re-marking: reuse the timestamp from before it was toggled off, so an
-      // accidental off/on doesn't wipe the original completion date.
-      progress[champ.id] =
-        clearedTimestamps.get(key) || new Date().toISOString();
-      clearedTimestamps.delete(key);
-    } else {
-      clearedTimestamps.set(key, progress[champ.id]);
-      progress[champ.id] = false;
-    }
+    const nowDone = toggleChampionDone(champ.id);
     // A champion can appear twice (main grid + the "Available now" scan
     // group); keep every card for this id visually in sync.
     syncChampionCardState(champ.id, nowDone);
