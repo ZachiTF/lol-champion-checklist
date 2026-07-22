@@ -739,7 +739,7 @@ const mk = (id, score, alts) => ({
   score: score == null ? 5 : score,
   ham: 8,
   color: 10,
-  alts: (alts || []).map((a) => ({ id: a })),
+  alts: (alts || []).map((a) => ({ id: a, color: 18 })),
 });
 // A frame = { bench:[{m,verdict}], picks:[{m,verdict}] }. Helper to build picks
 // where the first `n` circles show a champion and the rest are grey placeholders.
@@ -835,6 +835,31 @@ test("consensus: a genuinely flipping read stays maybe and names alternatives", 
   assert.ok(
     (r.alternatives.get(winner) || []).length >= 1,
     "alternatives shown",
+  );
+});
+
+test("consensus: reports a match-distance score for best guess and alternatives", () => {
+  const r = feed([
+    {
+      bench: [{ m: mk("Zeri", 6, ["Zyra"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+    {
+      bench: [{ m: mk("Zeri", 6, ["Zyra"]), verdict: "maybe" }],
+      picks: picksFilled(5),
+    },
+  ]);
+  const sc = r.scores.get("Zeri");
+  assert.ok(sc, "the best guess has a score entry");
+  assert.equal(
+    sc.self,
+    10,
+    "self = the best-guess match distance (lower better)",
+  );
+  assert.equal(
+    sc.alts.get("Zyra"),
+    18,
+    "each alternative carries its distance",
   );
 });
 

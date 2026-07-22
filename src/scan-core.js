@@ -817,17 +817,26 @@ function createScanAggregator(opts) {
 // of recognized champions (with their best verdict + alternative ids) and how
 // many of the five team circles currently show a champion.
 function aggFrameRecord(benchSlots, pickCircles) {
-  const info = new Map(); // id -> { accept:bool, alts:Set }
+  // id -> { accept:bool, alts:Map(altId->minColor), color:minColor }. `color` is
+  // the match distance (lower = closer icon match) surfaced as a confidence number.
+  const info = new Map();
   const fold = (pos) => {
     const m = pos && pos.m;
     if (!m || pos.verdict === "reject") return false;
     let rec = info.get(m.id);
     if (!rec) {
-      rec = { accept: false, alts: new Set() };
+      rec = { accept: false, alts: new Map(), color: m.color ?? Infinity };
       info.set(m.id, rec);
+    } else if (m.color != null && m.color < rec.color) {
+      rec.color = m.color;
     }
     if (pos.verdict === "accept") rec.accept = true;
-    for (const a of m.alts || []) if (a.id !== m.id) rec.alts.add(a.id);
+    for (const a of m.alts || []) {
+      if (a.id === m.id) continue;
+      const col = a.color ?? Infinity;
+      const prev = rec.alts.get(a.id);
+      if (prev == null || col < prev) rec.alts.set(a.id, col);
+    }
     return true;
   };
   for (const s of benchSlots || []) fold(s);
@@ -850,25 +859,32 @@ function aggregateResult(agg) {
   const confirm = Math.min(agg.confirm, n || 1);
   // Tally appearances + collect alternatives across the window; keep a stable
   // first-seen order so the pinned list doesn't reshuffle every poll.
-  const seen = new Map(); // id -> { count, accept, alts:Set }
+  const seen = new Map(); // id -> { count, accept, alts:Map(altId->minColor), color }
   const order = [];
   for (const f of frames) {
     f.info.forEach((rec, id) => {
       let s = seen.get(id);
       if (!s) {
-        s = { count: 0, accept: false, alts: new Set() };
+        s = { count: 0, accept: false, alts: new Map(), color: rec.color };
         seen.set(id, s);
         order.push(id);
       }
       s.count++;
       if (rec.accept) s.accept = true;
-      rec.alts.forEach((a) => s.alts.add(a));
+      if (rec.color < s.color) s.color = rec.color;
+      rec.alts.forEach((col, aid) => {
+        const p = s.alts.get(aid);
+        if (p == null || col < p) s.alts.set(aid, col);
+      });
     });
   }
   const ids = [];
   const uncertain = new Set();
   const alternatives = new Map();
   const confidence = new Map();
+  // rowId -> { self:number|null, alts:Map(altId->number) } — match distances
+  // (lower = closer) shown as confidence numbers in the double-check list.
+  const scores = new Map();
   for (const id of order) {
     const s = seen.get(id);
     // Show an id if it's held across enough recent frames (real) OR it's in the
@@ -879,9 +895,16 @@ function aggregateResult(agg) {
     const verdict = s.count >= confirm && s.accept ? "accept" : "maybe";
     ids.push(id);
     if (verdict === "maybe") uncertain.add(id);
-    const alts = [...s.alts].filter((a) => a !== id).slice(0, 3);
+    const alts = [...s.alts.keys()].filter((a) => a !== id).slice(0, 3);
     if (alts.length) alternatives.set(id, alts);
     confidence.set(id, { count: s.count, frames: n });
+    const altScore = new Map();
+    for (const aid of alts)
+      if (Number.isFinite(s.alts.get(aid))) altScore.set(aid, s.alts.get(aid));
+    scores.set(id, {
+      self: Number.isFinite(s.color) ? s.color : null,
+      alts: altScore,
+    });
   }
   // Readiness: all five team circles filled for the last `confirm` frames.
   let picksStreak = 0;
@@ -894,6 +917,7 @@ function aggregateResult(agg) {
     uncertain,
     alternatives,
     confidence,
+    scores,
     picksFilled: last ? last.picksFilled : 0,
     picksStreak,
     frames: n,

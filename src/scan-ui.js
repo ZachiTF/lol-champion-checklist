@@ -223,22 +223,30 @@ function locateForScan(buf, w, h) {
 
 // For the one-shot (single-frame) path there's no cross-frame consensus, so an
 // uncertain id's "alternatives" are just the runner-up champions from the slot it
-// matched. Returns Map(id -> [altId, ...]) for the uncertain ids only.
-function altsFromReads(reads, uncertain) {
-  const out = new Map();
-  if (!uncertain || !uncertain.size) return out;
+// matched. Returns { alternatives: Map(id -> [altId, ...]),
+// scores: Map(id -> { self, alts:Map(altId->color) }) } — the same shape the live
+// consensus produces, so renderScanResults can show match-distance confidence
+// numbers either way. `color` is the icon-match distance (lower = closer).
+function altsAndScoresFromReads(reads, uncertain) {
+  const alternatives = new Map();
+  const scores = new Map();
+  if (!uncertain || !uncertain.size) return { alternatives, scores };
   for (const r of reads) {
     for (const pos of r.slots || r.circles || []) {
       const m = pos.m;
-      if (!m || !uncertain.has(m.id) || out.has(m.id)) continue;
-      const alts = (m.alts || [])
-        .map((a) => a.id)
-        .filter((id) => id !== m.id)
-        .slice(0, 3);
-      if (alts.length) out.set(m.id, alts);
+      if (!m || !uncertain.has(m.id) || alternatives.has(m.id)) continue;
+      const altObjs = (m.alts || []).filter((a) => a.id !== m.id).slice(0, 3);
+      if (!altObjs.length) continue;
+      alternatives.set(
+        m.id,
+        altObjs.map((a) => a.id),
+      );
+      const altScore = new Map();
+      for (const a of altObjs) if (a.color != null) altScore.set(a.id, a.color);
+      scores.set(m.id, { self: m.color ?? null, alts: altScore });
     }
   }
-  return out;
+  return { alternatives, scores };
 }
 
 // ---- Web Worker: run locate + read off the main thread (live loop) ----
@@ -459,10 +467,15 @@ async function runScanFromBuffer(buf, w, h) {
     return 0;
   }
   scanStep(STEP_PICKS, "done");
+  const { alternatives, scores } = altsAndScoresFromReads(
+    [bench, picks],
+    uncertain,
+  );
   scanState = {
     ids,
     uncertain,
-    alternatives: altsFromReads([bench, picks], uncertain),
+    alternatives,
+    scores,
     active: true,
     finalized: true,
   };
@@ -590,9 +603,10 @@ function renderScanResults() {
     for (const id of uncertainWithAlts) {
       const champ = byId.get(id);
       if (!champ) continue;
+      const rowScores = scanState.scores?.get(id);
       const row = document.createElement("div");
       row.className = "scan-uncertain-row";
-      row.appendChild(scanMiniChip(champ, "best"));
+      row.appendChild(scanMiniChip(champ, "best", rowScores?.self));
       const arrow = document.createElement("span");
       arrow.className = "scan-uncertain-or";
       arrow.textContent = "or";
@@ -601,7 +615,10 @@ function renderScanResults() {
       altWrap.className = "scan-uncertain-alts";
       for (const altId of alternatives.get(id) || []) {
         const alt = byId.get(altId);
-        if (alt) altWrap.appendChild(scanMiniChip(alt, "alt"));
+        if (alt)
+          altWrap.appendChild(
+            scanMiniChip(alt, "alt", rowScores?.alts?.get(altId)),
+          );
       }
       row.appendChild(altWrap);
       note.appendChild(row);
@@ -614,31 +631,30 @@ function renderScanResults() {
 }
 
 // A small icon+name chip used in the "double-check" alternatives list. `kind` is
-// "best" (the winning guess) or "alt" (a runner-up). Clicking a chip toggles that
-// champion done, just like a card — handy when the alternative is the real one.
-function scanMiniChip(champ, kind) {
-  const chip = document.createElement("button");
+// "best" (the winning guess) or "alt" (a runner-up). Display-only (not clickable —
+// the real toggle lives on the champion card above): it shows the match distance
+// as a confidence number so the best guess and its alternatives can be compared.
+// `score` is that distance (lower = closer icon match), or null if unavailable.
+function scanMiniChip(champ, kind, score) {
+  const chip = document.createElement("div");
   chip.className = "scan-chip scan-chip-" + kind;
   chip.title =
-    kind === "best" ? `${champ.name} (best guess)` : `Could be ${champ.name}`;
+    kind === "best" ? `${champ.name} — best guess` : `Could be ${champ.name}`;
   const img = document.createElement("img");
   img.src = `${CHAMPION_ICON_BASE}${champ.image.full}`;
   img.alt = champ.name;
   const name = document.createElement("span");
+  name.className = "scan-chip-name";
   name.textContent = champ.name;
   chip.appendChild(img);
   chip.appendChild(name);
-  chip.onclick = () => {
-    const nowDone = toggleChampionDone(champ.id);
-    syncChampionCardState(champ.id, nowDone);
-    saveState();
-    updateProgressText();
-    refreshFilterCounts();
-    refreshScanCount();
-    renderHistory();
-    chip.classList.toggle("done", nowDone);
-  };
-  if (getProgress()[champ.id]) chip.classList.add("done");
+  if (score != null && Number.isFinite(score)) {
+    const conf = document.createElement("span");
+    conf.className = "scan-chip-conf";
+    conf.textContent = score.toFixed(1);
+    conf.title = "match distance — lower means a closer icon match";
+    chip.appendChild(conf);
+  }
   return chip;
 }
 
@@ -964,6 +980,7 @@ async function liveLoop() {
           uncertain: agg.uncertain,
           alternatives: agg.alternatives,
           confidence: agg.confidence,
+          scores: agg.scores,
           active: true,
           finalized: agg.stable,
         };

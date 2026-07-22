@@ -1161,17 +1161,13 @@ body.summoner-search-hidden .wip-notice {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px 3px 3px;
+  padding: 3px 5px 3px 3px;
   border-radius: 999px;
   border: 1px solid rgba(var(--accent-rgb), 0.35);
   background: rgba(var(--accent-rgb), 0.06);
   color: inherit;
-  cursor: pointer;
   font-size: 0.85em;
   line-height: 1.2;
-}
-.scan-chip:hover {
-  border-color: rgba(var(--accent-rgb), 0.75);
 }
 .scan-chip img {
   width: 22px;
@@ -1186,13 +1182,16 @@ body.summoner-search-hidden .wip-notice {
 .scan-chip-alt {
   opacity: 0.9;
 }
-.scan-chip.done {
-  border-color: #81c784;
-  background: rgba(129, 199, 132, 0.14);
-}
-.scan-chip.done span {
-  text-decoration: line-through;
-  opacity: 0.7;
+/* Match-distance confidence badge (lower = closer icon match). */
+.scan-chip-conf {
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.16);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.9em;
+  opacity: 0.85;
 }
 
 .scan-overlay {
