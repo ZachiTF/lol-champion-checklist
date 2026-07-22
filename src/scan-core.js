@@ -175,21 +175,6 @@ function smooth1d(A, r) {
   }
   return out;
 }
-// Contiguous runs of a profile above a threshold → [ [start,end], ... ].
-function contiguousRuns(S, thr) {
-  const out = [];
-  let st = -1;
-  for (let i = 0; i < S.length; i++) {
-    if (S[i] > thr) {
-      if (st < 0) st = i;
-    } else if (st >= 0) {
-      out.push([st, i - 1]);
-      st = -1;
-    }
-  }
-  if (st >= 0) out.push([st, S.length - 1]);
-  return out;
-}
 // Column vertical-edge energy summed over rows [yt,yb].
 function colEdgeProfile(buf, W, yt, yb) {
   const C = new Float64Array(W);
@@ -1166,6 +1151,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     pxLum,
     pxSat,
+    fillStd,
     dHashRegion,
     colorSigRegion,
     hamming64,

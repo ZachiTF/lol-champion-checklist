@@ -214,6 +214,149 @@ test("mode extension points lay out the right spot structure", () => {
   );
 });
 
+// ---- matching primitives (deterministic, synthetic buffers — no fixtures) ----
+// Build a w×h RGBA buffer from an (x,y) -> [r,g,b] function (alpha = 255).
+function makeBuf(w, h, fn) {
+  const b = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const [r, g, bl] = fn(x, y);
+      const i = (y * w + x) * 4;
+      b[i] = r;
+      b[i + 1] = g;
+      b[i + 2] = bl;
+      b[i + 3] = 255;
+    }
+  return b;
+}
+
+test("hamming64 counts differing bits", () => {
+  assert.equal(core.hamming64(0n, 0n), 0);
+  assert.equal(core.hamming64(0b1011n, 0b0001n), 2);
+  assert.equal(core.hamming64(1n << 63n, 0n), 1);
+});
+
+test("colorDist: 0 for identical, RMS for a uniform offset", () => {
+  assert.equal(core.colorDist([1, 2, 3], [1, 2, 3]), 0);
+  assert.ok(Math.abs(core.colorDist([0, 0, 0], [10, 10, 10]) - 10) < 1e-9);
+});
+
+test("pxLum / pxSat on a known pixel", () => {
+  const b = makeBuf(1, 1, () => [255, 0, 0]);
+  assert.ok(Math.abs(core.pxLum(b, 1, 0, 0) - 0.299 * 255) < 1e-9);
+  assert.equal(core.pxSat(b, 1, 0, 0), 255);
+});
+
+test("dHashRegion: a left→right brightness ramp sets every comparison bit", () => {
+  const w = 90,
+    h = 80;
+  const b = makeBuf(w, h, (x) => {
+    const v = Math.round((x / (w - 1)) * 255);
+    return [v, v, v];
+  });
+  // Each of the 9 downsample columns is strictly brighter than the one to its
+  // left, so every one of the 64 adjacent-column comparisons is true.
+  assert.equal(core.dHashRegion(b, w, h, 0, 0, w, h), (1n << 64n) - 1n);
+});
+
+test("colorSigRegion of a solid color is that color in all 9 cells", () => {
+  const b = makeBuf(30, 30, () => [10, 20, 30]);
+  const sig = core.colorSigRegion(b, 30, 30, 0, 0, 30, 30);
+  assert.equal(sig.length, 27);
+  for (let i = 0; i < 27; i += 3)
+    assert.deepEqual([sig[i], sig[i + 1], sig[i + 2]], [10, 20, 30]);
+});
+
+test("fillStd: ~0 on a uniform region, large on a high-contrast one", () => {
+  const flat = makeBuf(40, 40, () => [128, 128, 128]);
+  assert.ok(core.fillStd(flat, 40, 40, 20, 20, 20) < 1);
+  const checker = makeBuf(40, 40, (x, y) => {
+    const v = (x + y) % 2 ? 255 : 0;
+    return [v, v, v];
+  });
+  assert.ok(core.fillStd(checker, 40, 40, 20, 20, 20) > 100);
+});
+
+// ---- robustness: empty / no-champ-select frames must never throw ----
+const blank = { buf: new Uint8ClampedArray(200 * 150 * 4), W: 200, H: 150 };
+
+test("benchAnchoredClient returns null on a frame with no champ select", () => {
+  assert.equal(core.benchAnchoredClient(blank, ctx), null);
+});
+
+test("ARAM pipeline yields an empty read (no throw) on a blank frame", () => {
+  const r = core.runFrameRead(core.pipelineForMode("aram"), blank, ctx);
+  assert.deepEqual(r, { client: null });
+});
+
+test("pipeline.run short-circuits cleanly when no client is found", () => {
+  const out = core.pipelineForMode("aram").run(blank, ctx);
+  assert.equal(out.client, null);
+  assert.deepEqual(out.spots, []);
+  assert.deepEqual(out.matches, []);
+});
+
+test("aramSlots emits 10 bench spots even when no circles are detectable", () => {
+  const spots = core.aramSlots(blank, { x: 0, y: 0, w: 200, h: 150 }, ctx);
+  assert.equal(spots.filter((s) => s.kind === "bench").length, 10);
+  assert.ok(spots.filter((s) => s.kind === "circle").length <= 5);
+});
+
+test("toSpotMatch handles a null match (empty slot) without throwing", () => {
+  const sm = core.toSpotMatch(
+    { kind: "bench", index: 0, cx: 0, cy: 0, size: 40 },
+    null,
+    "reject",
+  );
+  assert.equal(sm.id, null);
+  assert.deepEqual(sm.alts, []);
+  assert.equal(sm.verdict, "reject");
+});
+
+// ---- runFrameRead reduction semantics (deterministic fake pipeline) ----
+// A fake pipeline lets us pin the bench-first dedup and uncertain-carry rules
+// exactly, independent of any fixture or the tuned matcher.
+function fakePipeline(matchesFor) {
+  return core.createPipeline({
+    findClient: () => ({ x: 0, y: 0, w: 10, h: 10 }),
+    provideSlots: () => [
+      { kind: "bench", index: 0, cx: 0, cy: 0, size: 40 },
+      { kind: "circle", index: 0, cx: 0, cy: 0, size: 40 },
+    ],
+    matchIcons: (f, spots) => spots.map((s, i) => matchesFor(s, i)),
+  });
+}
+const canned = (id, verdict) =>
+  core.toSpotMatch(
+    { kind: "x" },
+    { id, ham: 0, color: 0, score: 0, alts: [] },
+    verdict,
+  );
+
+test("runFrameRead dedups a champ on both bench and a circle (bench-first)", () => {
+  const r = core.runFrameRead(
+    fakePipeline((s) => ({ ...canned("Ahri", "accept"), spot: s })),
+    blank,
+    ctx,
+  );
+  assert.deepEqual(r.ids, ["Ahri"]); // appears once
+  assert.equal(r.benchCount, 1);
+  assert.equal(r.picks, 1); // still counts as a locked pick
+});
+
+test("runFrameRead marks a champ uncertain if any position is a maybe", () => {
+  const r = core.runFrameRead(
+    fakePipeline((s) => ({
+      ...canned("Ahri", s.kind === "circle" ? "maybe" : "accept"),
+      spot: s,
+    })),
+    blank,
+    ctx,
+  );
+  assert.deepEqual(r.ids, ["Ahri"]);
+  assert.ok(r.uncertain.has("Ahri"), "uncertain carries from the circle read");
+});
+
 // ---- locate-stage robustness: a "full desktop" print screen ----
 // The pipeline must find the client anywhere in the frame and at any scale, not
 // just when the screenshot is cropped exactly to the client. Synthesize those
