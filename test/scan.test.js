@@ -598,6 +598,25 @@ test("detects champions when the client is scaled up (higher-res capture)", () =
   assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
 });
 
+test("locates a MAXIMIZED client on a high-DPI monitor (2x and 2.5x)", () => {
+  // A maximized client on a 1440p/4K screen renders the bench at ~118-147px pitch.
+  // A pitch cap of 100 rejected those outright: the bench was never found, and
+  // each failing locate burned 7-13s exhausting every candidate band — which then
+  // (via the old worker timeout) re-ran on the main thread and froze the UI.
+  for (const scale of [2, 2.5]) {
+    const CW = Math.round(W * scale) + 200,
+      CH = Math.round(H * scale) + 150;
+    const b = embed(buf, W, H, CW, CH, 100, 80, scale);
+    const r = detectAll(b, CW, CH);
+    assert.ok(r, `bench should be located at ${scale}x`);
+    assert.ok(
+      Math.abs(r.bench.pitch - 59 * scale) <= 8,
+      `${scale}x: pitch ${r.bench.pitch} not near ${Math.round(59 * scale)}`,
+    );
+    assert.deepEqual(r.benchIds, EXPECTED, `${scale}x bench`);
+  }
+});
+
 // ---- a second, independent ARAM screenshot (different champs, 6-slot bench) ----
 // Guards against overfitting the geometry/thresholds to the first screenshot.
 const png2 = PNG.sync.read(fs.readFileSync(path.join(FIX, "aram-bench-2.png")));
@@ -726,6 +745,119 @@ test("locates the bench under a higher-contrast distractor (browser chrome)", ()
   );
   assert.deepEqual(r.benchIds, EXPECTED);
   assert.deepEqual(r.circleIds, EXPECTED_CIRCLES);
+});
+
+// ---- layout verification ("is the window really where we think?") ----------
+// verifyLayout's job is to catch a mislocated / drifted client. The property that
+// matters most is the ASYMMETRY: it must never reject a correctly-located bench
+// (that would be worse than not checking at all), while catching geometry that
+// straddles icon borders or puts a champion after an empty slot.
+
+// Read a bench geometry the way the live loop does (tight, cached-geometry reads)
+// into the { m, verdict } records verifyLayout consumes.
+function readSlots(b, w, h, slots) {
+  return slots.map((slot) => {
+    const m = core.matchSlot(b, w, h, slot, iconHashById, { tight: true });
+    return { m, verdict: core.classifyMatch(m) };
+  });
+}
+
+test("verifyLayout accepts every correctly-located fixture", () => {
+  const cases = [
+    ["fixture 1", buf, W, H],
+    ["fixture 2", png2.data, png2.width, png2.height],
+    ["desktop", png3.data, png3.width, png3.height],
+    ["cooldown", png4.data, png4.width, png4.height],
+  ];
+  for (const [label, b, w, h] of cases) {
+    const bench = core.findBenchBar(b, w, h, iconHashById);
+    assert.ok(bench, `${label}: bench should be located`);
+    const v = core.verifyLayout(readSlots(b, w, h, bench.slots));
+    assert.ok(v.ok, `${label}: correct layout rejected — ${v.reason}`);
+    assert.equal(v.unexplained, 0, `${label}: unexplained slots`);
+    assert.equal(v.afterGap, 0, `${label}: champion after an empty slot`);
+    assert.equal(
+      v.champions + v.empty,
+      10,
+      `${label}: every slot should be champion or empty`,
+    );
+  }
+});
+
+test("verifyLayout rejects a bench shifted half a slot out of phase", () => {
+  const bench = core.findBenchBar(buf, W, H, iconHashById);
+  const off = bench.slots.map((s) => ({
+    cx: s.cx + Math.round(bench.pitch / 2),
+    cy: s.cy,
+    size: s.size,
+  }));
+  const v = core.verifyLayout(readSlots(buf, W, H, off));
+  assert.ok(!v.ok, "a half-pitch-shifted bench should not verify");
+  assert.ok(v.reason, "a rejection should say why");
+});
+
+test("verifyLayout rejects a bench read at the wrong pitch", () => {
+  const bench = core.findBenchBar(buf, W, H, iconHashById);
+  const off = bench.slots.map((s, i) => ({
+    cx: s.cx + bench.pitch * 0.12 * (i - 4.5),
+    cy: s.cy,
+    size: s.size,
+  }));
+  const v = core.verifyLayout(readSlots(buf, W, H, off));
+  assert.ok(!v.ok, "a 12%-wrong pitch should not verify");
+});
+
+test("verifyLayout flags a champion sitting after an empty slot", () => {
+  // Left-packing is the structural rule: a real bench never has a champion after
+  // a gap. Synthesized directly so the rule is pinned independent of the pixels.
+  const champ = { m: { id: "Ahri", fill: 50 }, verdict: "accept" };
+  const empty = { m: { id: "Ahri", fill: 5 }, verdict: "reject" };
+  const good = core.verifyLayout([champ, champ, empty, empty]);
+  assert.ok(good.ok, `left-packed bench should verify — ${good.reason}`);
+  const bad = core.verifyLayout([champ, empty, champ, empty]);
+  assert.ok(!bad.ok, "a champion after a gap should not verify");
+  assert.equal(bad.afterGap, 1);
+});
+
+test("verifyLayout counts a high-variance non-champion slot as unexplained", () => {
+  // The misalignment signature: the slot holds real image content (high luminance
+  // std) but matches no champion — so it's neither a champion nor an empty panel.
+  const champ = { m: { id: "Ahri", fill: 50 }, verdict: "accept" };
+  const junk = { m: { id: "Ahri", fill: 45 }, verdict: "reject" };
+  const v = core.verifyLayout([champ, champ, junk, junk, junk, junk]);
+  assert.equal(v.unexplained, 4);
+  assert.ok(!v.ok, "unexplained slots should fail verification");
+});
+
+test("classifySlotOccupancy separates champion / empty / unexplained", () => {
+  assert.equal(
+    core.classifySlotOccupancy({ m: { fill: 50 }, verdict: "accept" }),
+    "champion",
+  );
+  assert.equal(
+    core.classifySlotOccupancy({ m: { fill: 50 }, verdict: "maybe" }),
+    "champion",
+  );
+  assert.equal(
+    core.classifySlotOccupancy({ m: { fill: 6 }, verdict: "reject" }),
+    "empty",
+  );
+  assert.equal(
+    core.classifySlotOccupancy({ m: { fill: 45 }, verdict: "reject" }),
+    "unexplained",
+  );
+  assert.equal(
+    core.classifySlotOccupancy({ m: null, verdict: "reject" }),
+    "unexplained",
+  );
+  assert.equal(core.classifySlotOccupancy(null), "unexplained");
+});
+
+test("runFrameRead reports verification alongside the read", () => {
+  const r = core.runFrameRead(core.pipelineForMode("aram"), { buf, W, H }, ctx);
+  assert.ok(r.verify, "runFrameRead should carry a verify result");
+  assert.ok(r.verify.ok, `real frame should verify — ${r.verify.reason}`);
+  assert.equal(r.verify.circles, 5);
 });
 
 // ---- temporal consensus across live frames (identity, recent window) ----

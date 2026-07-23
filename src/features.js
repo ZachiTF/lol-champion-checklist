@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 4;
+const FEATURES_VERSION = 5;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -88,6 +88,18 @@ const FEATURE_LIST = [
       {
         title: "Shows alternatives",
         desc: "when a champion is uncertain, it lists what else it might be so you can double-check at a glance.",
+      },
+    ],
+  },
+  {
+    icon: "🎯",
+    title: "Checks it found the right window",
+    desc: "Live reading now verifies the League window before trusting it: every bench slot has to be a champion or an empty slot. If it doesn't add up, it goes back and finds the window again by itself.",
+    since: 5,
+    sub: [
+      {
+        title: "“Start over” button",
+        desc: "if you can see it read the wrong thing, step it back a stage — once to re-read champion select, again to re-find the League window.",
       },
     ],
   },

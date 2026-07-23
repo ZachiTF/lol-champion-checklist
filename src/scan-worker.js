@@ -4,7 +4,14 @@
 // pulls it in here just as a <script> tag does on the page. The main thread falls
 // back to running the same functions inline when workers aren't available (e.g. a
 // page opened directly from a file:// path, where workers are blocked).
-importScripts("scan-core.js");
+// Two ways this file gets loaded:
+//   • directly as a classic worker (http/https) — the relative import below works;
+//   • preloaded by a Blob-worker wrapper that already importScripts'd scan-core.js
+//     by absolute URL. That's the file:// path, where constructing a classic
+//     worker from a path throws SecurityError ("origin 'null'"). A Blob worker's
+//     base URL is the blob, so a relative import would not resolve there.
+// Import only if the core isn't in scope yet, so both paths work unchanged.
+if (typeof findBenchBar === "undefined") importScripts("scan-core.js");
 
 // Champion hash map, rebuilt once from the serialized items the page sends, plus
 // the ARAM pipeline that composes the pure stages (ClientFinder → SlotProvider →
@@ -58,6 +65,9 @@ self.onmessage = (e) => {
       benchCount: r.benchCount,
       picks: r.picks,
       filledSlots: r.filledSlots,
+      // Layout verification, so the main thread's state machine can decide to
+      // step back and re-locate instead of trusting a bad read.
+      verify: r.verify,
       // Per-position matches so the main thread can vote across frames.
       benchSlots: r.benchSlots,
       pickCircles: r.pickCircles,

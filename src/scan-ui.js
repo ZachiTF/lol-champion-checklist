@@ -257,18 +257,47 @@ let scanWorker = null;
 let scanWorkerReady = false;
 let scanWorkerDisabled = false;
 let scanWorkerReadyPromise = null;
+let scanWorkerBlobUrl = null; // set only on the file:// Blob-worker fallback
 let scanReqId = 1;
 const scanReqPending = new Map(); // id -> resolve
+
+// Absolute URLs for the pipeline scripts. A Blob worker's base URL is the blob
+// itself, so it can't resolve relative importScripts — it needs these spelled out.
+function scanWorkerUrls() {
+  const tag = document.querySelector('script[src*="scan-core.js"]');
+  const core = tag ? tag.src : new URL("src/scan-core.js", location.href).href;
+  return {
+    core,
+    worker: core.replace(/scan-core\.js(\?.*)?$/, "scan-worker.js"),
+  };
+}
 
 function ensureScanWorker() {
   if (scanWorker || scanWorkerDisabled) return scanWorker;
   if (typeof Worker === "undefined" || !iconHashes || !iconHashes.items)
     return null;
+  const urls = scanWorkerUrls();
   try {
-    scanWorker = new Worker("src/scan-worker.js");
+    scanWorker = new Worker(urls.worker);
   } catch (_) {
-    scanWorkerDisabled = true; // file:// or blocked — never retry
-    return null;
+    // Opening index.html straight off disk (the README's own instructions) makes
+    // this throw SecurityError: a classic worker can't be loaded from a path on
+    // an "origin 'null'" page. That used to drop EVERY locate onto the main
+    // thread — a 1-2s freeze per poll, which is what made the panel unusable.
+    // A Blob worker has no such restriction and can pull in the same two files
+    // by absolute URL, so the pipeline stays off-thread on file:// too.
+    try {
+      const boot = `importScripts(${JSON.stringify(
+        urls.core,
+      )}, ${JSON.stringify(urls.worker)});`;
+      scanWorkerBlobUrl = URL.createObjectURL(
+        new Blob([boot], { type: "text/javascript" }),
+      );
+      scanWorker = new Worker(scanWorkerBlobUrl);
+    } catch (_) {
+      scanWorkerDisabled = true; // genuinely no worker here — main thread it is
+      return null;
+    }
   }
   scanWorkerReadyPromise = new Promise((res) => {
     scanWorker.onmessage = (e) => {
@@ -297,14 +326,23 @@ function teardownScanWorker(disable) {
     scanWorker = null;
   }
   scanWorkerReady = false;
+  if (scanWorkerBlobUrl) {
+    URL.revokeObjectURL(scanWorkerBlobUrl);
+    scanWorkerBlobUrl = null;
+  }
   if (disable) scanWorkerDisabled = true; // worker errored — stay on the main thread
   scanReqPending.forEach((resolve) => resolve(null));
   scanReqPending.clear();
 }
 
-// Run one frame through the worker; resolves the worker's message (or null on
-// timeout/failure so the caller can fall back). The buffer is cloned (not
-// transferred) so a fallback can still use it if the worker doesn't answer.
+// Run one frame through the worker; resolves the worker's message, or null if the
+// worker died. A slow answer is NOT a failure — see the timeout note below.
+//
+// The pixel buffer is TRANSFERRED, not cloned: a full-screen share is 8-30 MB per
+// frame and cloning that on every poll is main-thread time we're trying to save.
+// Transferring detaches it, which is fine because grabLiveFrame hands us a fresh
+// buffer each poll and nothing reads it afterwards.
+const SCAN_WORKER_TIMEOUT_MS = 30000; // only a hung-worker backstop, not a deadline
 function scanViaWorker(buf, w, h, cachedClient, tight) {
   return new Promise((resolve) => {
     const id = scanReqId++;
@@ -315,18 +353,29 @@ function scanViaWorker(buf, w, h, cachedClient, tight) {
       resolve(m);
     };
     scanReqPending.set(id, (m) => finish(m));
+    // A generous backstop for a genuinely wedged worker. It must stay well above
+    // the slowest real locate (a full search over a 4K frame is ~2s) — the old 4s
+    // deadline fired routinely and then re-ran that same multi-second locate
+    // SYNCHRONOUSLY on the main thread, freezing the UI and the buttons with it.
+    // On expiry we recycle the worker rather than taking over the main thread.
     setTimeout(() => {
-      if (scanReqPending.delete(id)) finish(null); // worker hung — fall back
-    }, 4000);
-    scanWorker.postMessage({
-      type: "scan",
-      id,
-      buf,
-      w,
-      h,
-      client: cachedClient || null,
-      tight: !!tight,
-    });
+      if (scanReqPending.delete(id)) {
+        teardownScanWorker(false); // recycle; a later poll builds a fresh one
+        finish(null);
+      }
+    }, SCAN_WORKER_TIMEOUT_MS);
+    scanWorker.postMessage(
+      {
+        type: "scan",
+        id,
+        buf,
+        w,
+        h,
+        client: cachedClient || null,
+        tight: !!tight,
+      },
+      [buf.buffer],
+    );
   });
 }
 
@@ -347,29 +396,37 @@ async function scanFrameAsync(buf, w, h, cachedClient, tight) {
   const worker = ensureScanWorker();
   if (worker) {
     if (!scanWorkerReady && scanWorkerReadyPromise) {
+      // Wait for the worker to come up. If it never does, disable it for good so
+      // the main-thread path is a deliberate, one-time decision — not something
+      // we silently drop into mid-session on every slow frame.
       await Promise.race([
         scanWorkerReadyPromise,
-        new Promise((r) => setTimeout(r, 1500)),
+        new Promise((r) => setTimeout(r, 5000)),
       ]);
+      if (!scanWorkerReady) teardownScanWorker(true);
     }
     if (scanWorkerReady) {
       const m = await scanViaWorker(buf, w, h, cachedClient, tight);
-      if (m) {
-        if (!m.client) return { layout: null };
-        return {
-          layout: m.client,
-          ids: m.ids,
-          uncertain: new Set(m.uncertainIds),
-          picks: m.picks,
-          benchCount: m.benchCount,
-          filledSlots: m.filledSlots,
-          benchSlots: m.benchSlots,
-          pickCircles: m.pickCircles,
-        };
-      }
-      // worker failed/timed out — fall through to the main thread (buf is intact)
+      // A null answer means the worker died/was recycled. Skip this frame rather
+      // than running the same heavy locate on the main thread — that freeze is
+      // what made the Start over / Stop sharing buttons unclickable.
+      if (!m || !m.client) return { layout: null };
+      return {
+        layout: m.client,
+        ids: m.ids,
+        uncertain: new Set(m.uncertainIds),
+        picks: m.picks,
+        benchCount: m.benchCount,
+        filledSlots: m.filledSlots,
+        verify: m.verify,
+        benchSlots: m.benchSlots,
+        pickCircles: m.pickCircles,
+      };
     }
   }
+  // Main thread only when there is genuinely no worker (file://, blocked). This
+  // path DOES block the UI for the duration of the read; it's the documented
+  // fallback, not something a slow frame can drop us into.
   const frame = { buf, W: w, H: h };
   const ctx = {
     iconHashById: iconHashes.byId,
@@ -385,6 +442,7 @@ async function scanFrameAsync(buf, w, h, cachedClient, tight) {
     picks: r.picks,
     benchCount: r.benchCount,
     filledSlots: r.filledSlots,
+    verify: r.verify,
     benchSlots: r.benchSlots,
     pickCircles: r.pickCircles,
   };
@@ -481,7 +539,15 @@ async function runScanFromBuffer(buf, w, h) {
   };
   renderScanResults();
   const n = ids.length;
-  scanSetStatus(`Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓`);
+  // Same layout check the live loop uses. There's no state to step back to on a
+  // single pasted image, so just say the read looks off — the champions are still
+  // pinned, flagged, and the user can re-crop or paste a cleaner screenshot.
+  const v = verifyLayout(bench.slots, picks.circles);
+  scanSetStatus(
+    `Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓` +
+      (v.ok ? "" : ` (heads up: ${v.reason} — double-check these)`),
+    !v.ok,
+  );
   scanHost()
     ?.querySelector(".scan-pinned")
     ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -721,6 +787,83 @@ let liveGoneSince = 0; // when champ select first went missing (ms), 0 = present
 let liveNextCheckAt = 0; // when the next check is scheduled (ms) — drives the countdown
 let liveChecking = false; // true while a read is actually running (blocks the thread)
 
+// ---- the live state machine ------------------------------------------------
+// watching → reading → complete, plus an explicit way BACK. Going back is how the
+// scanner recovers when it locked onto the wrong thing: re-entering an earlier
+// state drops the caches the LATER states own, so the work is genuinely redone
+// (back to "watching" drops the cached client rect, forcing a fresh full locate).
+// Two things drive it: the automatic layout check (verifyLayout — a bench whose
+// slots aren't all champions-or-empty means the window isn't where we think), and
+// the user's "Start over" button when they can see it got something wrong.
+const LIVE_FLOW = ["watching", "reading", "complete"];
+let liveHistory = []; // states we came from, most recent last: [{ state, at, why }]
+let liveBadStreak = 0; // consecutive frames whose layout failed verification
+// Bumped on every state change. A poll captures it before its first await and
+// bails if it changed while the read was in flight — otherwise a read that
+// started before "Start over" would land afterwards and undo it, which is
+// exactly why the button looked like it did nothing.
+let liveEpoch = 0;
+const LIVE_VERIFY_STRIKES = 2; // fail this many in a row before stepping back —
+// a single frame grabbed mid-animation can fail the check honestly.
+
+// Entry actions. Each state resets what the states AFTER it derived, so entering
+// an earlier state really does discard the later work rather than just relabel it.
+function liveEnter(state) {
+  liveState = state;
+  liveBadStreak = 0;
+  liveEpoch++; // any read still in flight belongs to the old state — discard it
+  if (state === "watching") {
+    liveLayout = null; // no cached client rect → next poll does a full locate
+    liveAgg = null;
+    liveFocus = null;
+    liveFilledSlots = null;
+    liveGoneSince = 0;
+    scanSetStepStates(["done", "active", "pending", "pending"]);
+  } else if (state === "reading") {
+    // A fresh consensus every time we (re-)enter reading — otherwise coming back
+    // from "complete" would re-finalize instantly off the old stable window.
+    liveAgg = createScanAggregator();
+    liveFilledSlots = null;
+    liveGoneSince = 0;
+  }
+}
+// Move forward (or anywhere), remembering where we came from.
+function liveSetState(next, why) {
+  if (liveState === next) return;
+  liveHistory.push({ state: liveState, at: Date.now(), why });
+  if (liveHistory.length > 8) liveHistory.shift();
+  liveEnter(next);
+}
+// Drop back to hunting for the window. Unlike liveSetState this re-runs the entry
+// actions even when we're nominally already watching, so a rejected frame can't
+// leave its cached rect or its focus overlay standing.
+function liveRelocate(why) {
+  if (liveState === "watching") liveEnter("watching");
+  else liveSetState("watching", why);
+}
+// Step back one state and resume polling there. Repeated presses walk the ladder:
+// complete → reading (re-read champion select) → watching (re-find the window).
+function liveGoBack(why) {
+  if (!liveVideo || liveState === "idle") return;
+  const entry = liveHistory.pop();
+  const prev =
+    entry && entry.state !== "idle" && entry.state !== liveState
+      ? entry.state
+      : LIVE_FLOW[Math.max(0, LIVE_FLOW.indexOf(liveState) - 1)];
+  liveEnter(prev);
+  if (liveTimer) {
+    clearTimeout(liveTimer);
+    liveTimer = null;
+  }
+  liveChecking = false;
+  scanSetStatus(
+    prev === "watching"
+      ? `Finding the League window again${why ? ` — ${why}` : ""}…`
+      : `Reading champion select again${why ? ` — ${why}` : ""}…`,
+  );
+  scheduleNextCheck(prev === "complete" ? liveWatchTick : liveLoop, 150);
+}
+
 // Reads are cheap now (tight per-slot search, off-thread in a Web Worker), so we
 // poll often and build a consensus from many frames rather than trusting one.
 const LIVE_INTERVAL_MS = 600; // wait between reading-phase checks (shown as countdown)
@@ -739,6 +882,8 @@ function stopLiveCapture() {
     liveTicker = null;
   }
   liveState = "idle";
+  liveHistory = [];
+  liveBadStreak = 0;
   liveLayout = null;
   liveAgg = null;
   liveFilledSlots = null;
@@ -754,6 +899,7 @@ function stopLiveCapture() {
     liveVideo = null;
   }
   livePreview = null;
+  liveGrabCanvas = null;
   liveFocus = null;
   // Nothing is running anymore — clear the checklist so its spinner stops turning.
   scanStepStates = null;
@@ -761,13 +907,17 @@ function stopLiveCapture() {
 }
 
 // Draw the current live frame to a canvas → raw RGBA buffer, or null if not ready.
+// The canvas is reused across polls: a fresh full-screen one every 600ms meant
+// allocating (and then collecting) tens of MB of backing store on the main thread.
+let liveGrabCanvas = null;
 function grabLiveFrame() {
   if (!liveVideo || !liveVideo.videoWidth) return null;
   const w = liveVideo.videoWidth,
     h = liveVideo.videoHeight;
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  if (!liveGrabCanvas) liveGrabCanvas = document.createElement("canvas");
+  const canvas = liveGrabCanvas;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(liveVideo, 0, 0, w, h);
   return { buf: ctx.getImageData(0, 0, w, h).data, w, h };
@@ -843,18 +993,28 @@ const FOCUS_COLORS = {
 // team-circle box, colored by how confident the current match is. Everything is in
 // captured-frame pixels and the canvas shares the frame's resolution, so the boxes
 // line up with the video exactly (no letterbox math).
+// The preview is never shown larger than a couple hundred CSS pixels, so backing
+// it with a full 4K canvas (redrawn 4x/sec) was pure main-thread cost for pixels
+// nobody sees. Cap the backing store and draw the overlay through a matching
+// transform, so the boxes still line up and the picture looks identical.
+const LIVE_PREVIEW_MAX_W = 900;
 function paintLivePreview() {
   const cv = livePreview;
   if (!cv || !liveVideo || !liveVideo.videoWidth) return;
   const fw = liveVideo.videoWidth,
     fh = liveVideo.videoHeight;
-  if (cv.width !== fw) cv.width = fw;
-  if (cv.height !== fh) cv.height = fh;
+  const sc = Math.min(1, LIVE_PREVIEW_MAX_W / fw); // frame px → canvas px
+  const cw = Math.max(1, Math.round(fw * sc)),
+    ch = Math.max(1, Math.round(fh * sc));
+  if (cv.width !== cw) cv.width = cw;
+  if (cv.height !== ch) cv.height = ch;
   const g = cv.getContext("2d");
-  g.drawImage(liveVideo, 0, 0, fw, fh);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(liveVideo, 0, 0, cw, ch);
   const f = liveFocus;
   if (!f || !f.client) return;
-  const lw = Math.max(1.5, fw / 600); // stroke scales with frame size
+  g.setTransform(sc, 0, 0, sc, 0, 0); // everything below is in FRAME pixels
+  const lw = Math.max(1.5, fw / 600) / sc; // constant on-screen stroke weight
   // Located client area.
   g.lineWidth = lw;
   g.setLineDash([lw * 4, lw * 3]);
@@ -906,8 +1066,8 @@ async function runLiveAuto() {
   }
   if (!liveVideo) return; // sharing was stopped while the DB loaded
   ensureScanWorker(); // warm the worker (seed hashes) before the first poll
-  scanSetStepStates(["done", "active", "pending", "pending"]);
-  liveState = "watching";
+  liveHistory = [];
+  liveEnter("watching");
   scanSetStatus(
     "Watching for champion select… open your ARAM lobby and it’ll read automatically.",
   );
@@ -921,9 +1081,11 @@ async function runLiveAuto() {
 async function liveLoop() {
   if (!liveVideo || (liveState !== "watching" && liveState !== "reading"))
     return;
+  const epoch = liveEpoch; // this poll belongs to the state we start in
   liveChecking = true;
   updateCadence();
-  await nextPaint(); // let "Checking…" show before the blocking read
+  await nextPaint(); // let "Checking…" show before the read is dispatched
+  if (epoch !== liveEpoch) return; // state changed under us — that poll owns it now
   const frame = grabLiveFrame();
   if (frame) {
     // Reuse the cached layout if we have one (fast tight reads); only pay for a
@@ -937,22 +1099,47 @@ async function liveLoop() {
       liveLayout,
       cached,
     );
-    // Sharing may have been stopped during the await — bail if so.
-    if (!liveVideo || (liveState !== "watching" && liveState !== "reading")) {
+    // Sharing may have been stopped, or the user may have pressed Start over,
+    // while the read was in flight. Either way this result is stale — drop it
+    // without touching the state or scheduling a follow-up poll.
+    if (
+      !liveVideo ||
+      epoch !== liveEpoch ||
+      (liveState !== "watching" && liveState !== "reading")
+    ) {
       liveChecking = false;
       return;
     }
     if (!res.layout || (!res.ids.length && cached)) {
       // Nothing here — or a cached layout that stopped reading (window moved /
-      // champ select ended). Drop the cache + consensus and go back to watching.
-      liveLayout = null;
-      liveAgg = null;
-      liveFocus = null; // no champ select in frame — drop the overlay boxes
-      liveState = "watching";
-      scanSetStepStates(["done", "active", "pending", "pending"]);
+      // champ select ended). Going back to watching drops the cache + consensus.
+      liveRelocate("champion select isn’t in the frame");
       scanSetStatus("Watching for champion select…");
+    } else if (res.verify && !res.verify.ok) {
+      // We found SOMETHING, but it doesn't hold together as an ARAM bench: every
+      // slot should be a champion or an empty placeholder, left-packed. Usually
+      // the League window isn't where we think it is (it moved under a cached
+      // rect, or the locate stage latched onto other champion art on screen).
+      // Don't let the frame vote, and step back to re-locate after a couple of
+      // strikes — one bad frame can just be a mid-animation grab.
+      liveBadStreak++;
+      liveFocus = {
+        client: res.layout,
+        bench: res.benchSlots,
+        circ: res.pickCircles,
+      };
+      paintLivePreview();
+      if (liveBadStreak >= LIVE_VERIFY_STRIKES) {
+        liveRelocate(res.verify.reason);
+        scanSetStatus(
+          `That doesn’t look like champion select (${res.verify.reason}) — finding the League window again…`,
+        );
+      } else {
+        scanSetStatus(`Checking the window is right (${res.verify.reason})…`);
+      }
     } else {
-      liveState = "reading";
+      liveBadStreak = 0;
+      liveSetState("reading", "champion select found");
       if (res.ids.length) liveLayout = res.layout; // cache a layout that reads
       // Update the live focus overlay from this frame's located area + boxes.
       liveFocus = {
@@ -987,10 +1174,10 @@ async function liveLoop() {
         renderScanResults();
         if (agg.stable) {
           // Consensus locked — pin it, stop scanning, watch for game start.
+          liveSetState("complete", "consensus stable");
           liveFilledSlots = res.filledSlots;
           liveFullAt = Date.now();
           liveGoneSince = 0;
-          liveState = "complete";
           liveChecking = false;
           const scope =
             liveSurface === "window" ? "the League window" : "your screen";
@@ -1034,9 +1221,11 @@ function liveStillPresent(buf, w, h) {
 // After a full read: watch for champion select to vanish, then drop the share.
 async function liveWatchTick() {
   if (!liveVideo || liveState !== "complete") return;
+  const epoch = liveEpoch;
   liveChecking = true;
   updateCadence();
   await nextPaint();
+  if (!liveVideo || epoch !== liveEpoch || liveState !== "complete") return;
   const frame = grabLiveFrame();
   const present = frame ? liveStillPresent(frame.buf, frame.w, frame.h) : false;
   const now = Date.now();
@@ -1086,6 +1275,15 @@ function renderLiveControls(active) {
     // automatic check runs, so it's clear the scanner is working on its own.
     const next = document.createElement("span");
     next.className = "scan-live-next";
+    // Manual counterpart to the automatic layout check: if you can see it read
+    // the wrong thing, walk the state machine back a step. Press again to go
+    // further back (re-read champion select → re-find the League window).
+    const back = document.createElement("button");
+    back.className = "scan-action scan-live-back";
+    back.textContent = "↩ Start over";
+    back.title =
+      "Go back a step: re-read champion select, or (again) re-find the League window";
+    back.onclick = () => liveGoBack("you asked to start over");
     const stop = document.createElement("button");
     stop.className = "scan-action";
     stop.textContent = "Stop sharing";
@@ -1097,6 +1295,7 @@ function renderLiveControls(active) {
     const row = document.createElement("div");
     row.className = "scan-live-row";
     row.appendChild(next);
+    row.appendChild(back);
     row.appendChild(stop);
     wrap.appendChild(row);
     updateCadence();

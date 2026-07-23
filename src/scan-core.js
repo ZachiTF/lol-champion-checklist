@@ -208,7 +208,12 @@ const CIRCLE_SIZE_FRAC = 0.81; // circle inscribed square / bench pitch
 const ICON_TO_PITCH = 0.78; // bench icon side / pitch (icons are ~square)
 
 const BENCH_PITCH_MIN = 30; // plausible bench-icon pitch in px (rules out thin
-const BENCH_PITCH_MAX = 100; // texture and tall low-frequency structure)
+// texture and tall low-frequency structure). The upper bound has to cover a
+// MAXIMIZED client on a high-DPI monitor: the bench pitch is ~59px at the native
+// 1274x706 client, so a 2x client renders it at ~118px and a 2.5x one at ~147px.
+// The old cap of 100 cut those off — the bench was never found, and each failing
+// locate cost 7-13s (it exhausts every candidate band) instead of ~1s.
+const BENCH_PITCH_MAX = 160;
 const BENCH_FILL_COLOR = 18; // color distance below this = a real champion icon
 const BENCH_TEETH = 11; // a 10-slot bench has 11 icon-border columns
 
@@ -548,6 +553,87 @@ function classifyMatch(m) {
   if (m.fill != null && m.fill >= SCAN_FILL_STD && m.ham <= SCAN_FILL_HAM)
     return "maybe";
   return "reject";
+}
+
+// ---- layout verification: "is this really champion select?" ---------------
+// The locate stage finds the bench by CHAMPION content, so it can lock onto the
+// wrong thing (a champion grid elsewhere on a shared screen) or drift out of
+// alignment (a cached client rect after the window moved). Champion matches alone
+// can't tell you: a misaligned grid still names *some* champion per slot.
+//
+// The tell is the EMPTY bench slots. A real ARAM bench is left-packed — champions
+// fill slots 0..k-1 and every slot after that is an empty placeholder panel. So a
+// correctly-located bench has every slot EXPLAINED as either a champion or an
+// empty slot, with no champion after the first gap. A misaligned one straddles
+// icon borders and produces slots that are neither.
+//
+// Empty slots are recognized by near-uniformity, NOT by a template. Measured over
+// the fixtures: an empty slot is a semi-transparent panel over the background
+// splash, so its dHash is noise (random crops match it better than real empties
+// match each other) and its color varies with whatever is behind it. What IS
+// stable is luminance std — empty 2.6-9.8 vs. filled 32.5-74.9, cleanly separated.
+const VERIFY_EMPTY_FILL = 20; // luminance std below this = an empty bench slot
+const VERIFY_MIN_EXPLAINED = 0.9; // this fraction of slots must be champion|empty
+const VERIFY_MIN_SLOTS = 4; // fewer slots than this = too little to judge
+
+// Classify one bench slot's occupancy: "champion" (matched), "empty" (a near-
+// uniform placeholder panel), or "unexplained" (neither — the geometry is off).
+function classifySlotOccupancy(pos) {
+  if (pos && pos.verdict && pos.verdict !== "reject" && pos.m)
+    return "champion";
+  const fill = pos && pos.m ? pos.m.fill : null;
+  if (fill != null && fill < VERIFY_EMPTY_FILL) return "empty";
+  return "unexplained";
+}
+
+/**
+ * Verify a located layout from a frame's per-slot bench results.
+ * @param {{m:(SlotMatch|null), verdict:string}[]} benchSlots bench positions, in order
+ * @param {{m:(SlotMatch|null), verdict:string}[]} [pickCircles] team circles (info only)
+ * @returns {{ ok:boolean, explained:number, champions:number, empty:number,
+ *   unexplained:number, afterGap:number, circles:number, reason:(string|null) }}
+ */
+function verifyLayout(benchSlots, pickCircles) {
+  const slots = benchSlots || [];
+  let champions = 0,
+    empty = 0,
+    unexplained = 0,
+    afterGap = 0,
+    firstGap = -1;
+  slots.forEach((pos, i) => {
+    const kind = classifySlotOccupancy(pos);
+    if (kind === "champion") {
+      champions++;
+      if (firstGap >= 0) afterGap++; // a champion AFTER an empty slot
+    } else {
+      if (kind === "empty") empty++;
+      else unexplained++;
+      if (firstGap < 0) firstGap = i;
+    }
+  });
+  const n = slots.length;
+  const explained = n ? (champions + empty) / n : 0;
+  const circles = (pickCircles || []).length;
+  let reason = null;
+  if (n < VERIFY_MIN_SLOTS) reason = "too few slots to verify";
+  else if (afterGap > 0)
+    reason = `${afterGap} champion${
+      afterGap === 1 ? "" : "s"
+    } after an empty slot`;
+  else if (explained < VERIFY_MIN_EXPLAINED)
+    reason = `${unexplained} slot${
+      unexplained === 1 ? "" : "s"
+    } are neither a champion nor an empty slot`;
+  return {
+    ok: reason === null,
+    explained,
+    champions,
+    empty,
+    unexplained,
+    afterGap,
+    circles,
+    reason,
+  };
 }
 
 // ---- team-pick circles (the 5 circular portraits down the left) ----
@@ -1188,6 +1274,10 @@ function runFrameRead(pipeline, frame, ctx) {
     benchCount,
     picks,
     filledSlots,
+    // Is this really champion select, or did we lock onto / drift off something
+    // else? The live loop steps its state machine back to re-locate when this
+    // fails on consecutive frames (see verifyLayout).
+    verify: verifyLayout(benchM, circleM),
     // `spot` (box geometry) rides along for the live focus overlay; the temporal
     // consensus only reads `m`/`verdict` and ignores it.
     benchSlots: benchM.map((x) => ({
@@ -1229,6 +1319,10 @@ if (typeof module !== "undefined" && module.exports) {
     readBench,
     readPicks,
     combineReads,
+    classifySlotOccupancy,
+    verifyLayout,
+    VERIFY_EMPTY_FILL,
+    VERIFY_MIN_EXPLAINED,
     createScanAggregator,
     aggregateFrame,
     aggregateResult,
