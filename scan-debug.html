@@ -198,7 +198,8 @@
       <em>or a full-desktop print screen</em> — to watch each step of
       <a href="src/scan-core.js">src/scan-core.js</a>: locate the client/bench/
       circles anywhere at any scale → 10-slot grid → per-slot local search →
-      dHash + color-signature match → verdict.
+      dHash + color-signature match → verify the layout holds together as
+      champion select → verdict.
     </p>
 
     <div id="drop" class="drop">
@@ -294,95 +295,23 @@
         );
       }
 
-      // Per-slot local search that also returns the top candidates (for display).
-      // Size-aware around the detected slot size, mirroring scan-core's matchSlot.
-      function debugMatch(buf, W, H, slot) {
-        let best = null;
-        const s = slot.size || 52;
-        const off = Math.max(6, Math.round(s * 0.22));
-        const step = Math.max(3, Math.round(off / 2));
-        for (const size of [s - 6, s - 3, s, s + 3, s + 6]) {
-          if (size < 16) continue;
-          for (let dx = -off; dx <= off; dx += step)
-            for (let dy = -off; dy <= off; dy += step) {
-              const x0 = Math.round(slot.cx - size / 2 + dx);
-              const y0 = Math.round(slot.cy - size / 2 + dy);
-              const h = dHashRegion(buf, W, H, x0, y0, size, size);
-              const t = Math.round(size * 0.04);
-              const sig = colorSigRegion(
-                buf,
-                W,
-                H,
-                x0 + t,
-                y0 + t,
-                size - 2 * t,
-                size - 2 * t,
-              );
-              const cands = [];
-              iconHashById.forEach((v, id) =>
-                cands.push({ id, ham: hamming64(h, v.h) }),
-              );
-              cands.sort((a, b) => a.ham - b.ham);
-              const top = cands.slice(0, 8).map((c) => {
-                const color = colorDist(sig, iconHashById.get(c.id).sig);
-                return {
-                  id: c.id,
-                  ham: c.ham,
-                  color,
-                  score: c.ham + color * 0.35,
-                };
-              });
-              top.sort((a, b) => a.score - b.score);
-              if (!best || top[0].score < best.top[0].score)
-                best = { x0, y0, size, h, sig, top };
-            }
-        }
-        return best;
-      }
-
-      // Circle variant: inscribed square (no mask) ranked against the icon
-      // center-crop hashes (hC/sigC). Mirrors scan-core's size-aware matchCircle.
-      function debugMatchCircle(buf, W, H, circle) {
-        let best = null;
-        const s = circle.size;
-        const f = s / 48;
-        const off = Math.max(9, Math.round(9 * f));
-        const step = Math.max(3, Math.round(3 * f));
-        const ds = Math.max(4, Math.round(4 * f));
-        for (const size of [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds]) {
-          if (size < 16) continue;
-          for (let dx = -off; dx <= off; dx += step)
-            for (let dy = -off; dy <= off; dy += step) {
-              const x0 = Math.round(circle.cx - size / 2 + dx);
-              const y0 = Math.round(circle.cy - size / 2 + dy);
-              const h = dHashRegion(buf, W, H, x0, y0, size, size);
-              const sig = colorSigRegion(buf, W, H, x0, y0, size, size);
-              const cands = [];
-              iconHashById.forEach((v, id) =>
-                cands.push({ id, ham: hamming64(h, v.hC) }),
-              );
-              cands.sort((a, b) => a.ham - b.ham);
-              const top = cands.slice(0, 8).map((c) => {
-                const color = colorDist(sig, iconHashById.get(c.id).sigC);
-                return {
-                  id: c.id,
-                  ham: c.ham,
-                  color,
-                  score: c.ham + color * 0.35,
-                };
-              });
-              top.sort((a, b) => a.score - b.score);
-              if (!best || top[0].score < best.top[0].score)
-                best = { x0, y0, size, h, sig, top };
-            }
-        }
-        return best;
-      }
-
       // ---- rendering helpers ----
-      // One breakdown card for a matched crop (shared by bench slots + circles).
-      function matchCard(canvas, d, label, verdict) {
-        const winner = d.top[0];
+      // One breakdown card for a spot's match — the SAME { spot, m, verdict }
+      // record the app's pipeline produces (runFrameRead → benchSlots/pickCircles).
+      // `m` is scan-core's raw match: id/ham/color/score, alts[], fill, and (with
+      // ctx.debug) the winning crop's pos/hash/sig. A matched spot crops from where
+      // the icon locked on (m.pos); an empty/reject one from its clean grid cell.
+      function matchCard(canvas, p, label) {
+        const { spot, m, verdict } = p;
+        const matched = verdict !== "reject" && m;
+        const box =
+          matched && m.pos
+            ? m.pos
+            : {
+                x0: Math.round(spot.cx - spot.size / 2),
+                y0: Math.round(spot.cy - spot.size / 2),
+                size: spot.size,
+              };
         const el = document.createElement("div");
         el.className = "slot " + verdict;
         el.innerHTML = `<div class="verdict">${label} · ${verdict}</div>`;
@@ -390,48 +319,58 @@
         row.className = "row";
         const cropWrap = document.createElement("div");
         cropWrap.appendChild(
-          cropCanvas(canvas, d.x0, d.y0, d.size, d.size, 1.4),
+          cropCanvas(canvas, box.x0, box.y0, box.size, box.size, 1.4),
         );
         cropWrap.insertAdjacentHTML(
           "beforeend",
           '<div class="cap">screenshot crop</div>',
         );
         row.appendChild(cropWrap);
-        if (verdict !== "reject") {
+        if (matched) {
           const iconWrap = document.createElement("div");
           const im = document.createElement("img");
-          im.width = im.height = Math.round(d.size * 1.4);
-          im.src = iconHashById.get(winner.id).url;
+          im.width = im.height = Math.round(box.size * 1.4);
+          im.src = iconHashById.get(m.id).url;
           iconWrap.appendChild(im);
           iconWrap.insertAdjacentHTML(
             "beforeend",
-            `<div class="cap">${winner.id}</div>`,
+            `<div class="cap">${m.id}</div>`,
           );
           row.appendChild(iconWrap);
         }
         el.appendChild(row);
-        const row2 = document.createElement("div");
-        row2.className = "row";
-        const dh = document.createElement("div");
-        dh.appendChild(dHashCanvas(d.h));
-        dh.insertAdjacentHTML("beforeend", '<div class="cap">dHash 8×8</div>');
-        const cs = document.createElement("div");
-        cs.appendChild(sigSwatches(d.sig));
-        cs.insertAdjacentHTML("beforeend", '<div class="cap">color 3×3</div>');
-        row2.appendChild(dh);
-        row2.appendChild(cs);
-        el.appendChild(row2);
+        if (!m) return el; // no match at all (e.g. empty database) — crop only
+        if (m.hash != null) {
+          const row2 = document.createElement("div");
+          row2.className = "row";
+          const dh = document.createElement("div");
+          dh.appendChild(dHashCanvas(m.hash));
+          dh.insertAdjacentHTML(
+            "beforeend",
+            '<div class="cap">dHash 8×8</div>',
+          );
+          const cs = document.createElement("div");
+          cs.appendChild(sigSwatches(m.sig));
+          cs.insertAdjacentHTML(
+            "beforeend",
+            '<div class="cap">color 3×3</div>',
+          );
+          row2.appendChild(dh);
+          row2.appendChild(cs);
+          el.appendChild(row2);
+        }
         el.insertAdjacentHTML(
           "beforeend",
-          `<div class="metrics">best: <b>${winner.id}</b> · ham <b>${
-            winner.ham
-          }</b> · color <b>${winner.color.toFixed(1)}</b></div>`,
+          `<div class="metrics">best: <b>${m.id}</b> · ham <b>${
+            m.ham
+          }</b> · color <b>${m.color.toFixed(1)}</b> · fill <b>${
+            m.fill != null ? m.fill.toFixed(1) : "—"
+          }</b></div>`,
         );
         const table = document.createElement("table");
         table.innerHTML =
           "<tr><th>candidate</th><th>ham</th><th>color</th><th>score</th></tr>" +
-          d.top
-            .slice(0, 5)
+          (m.alts || [])
             .map(
               (c, j) =>
                 `<tr class="${j === 0 ? "win" : ""}"><td>${c.id}</td><td>${
@@ -493,13 +432,22 @@
         ctx.drawImage(img, 0, 0);
         const buf = ctx.getImageData(0, 0, W, H).data;
 
-        // Stage 0: locate the client / bench / circles anywhere in the frame.
-        const layout = locateLayout(buf, W, H, iconHashById);
-        if (!layout) {
+        // Run the EXACT pipeline the app uses (aram mode): benchAnchoredClient →
+        // aramSlots → perceptualMatcher, reduced by runFrameRead. ctx.debug asks
+        // matchSlot/matchCircle to also hand back each winner's crop hash/sig for
+        // the breakdown below. Every box, verdict, and id drawn here is the app's
+        // own output — no logic is re-implemented in this page.
+        const frame = { buf, W, H };
+        const read = runFrameRead(pipelineForMode("aram"), frame, {
+          iconHashById,
+          debug: true,
+        });
+        if (!read.client) {
           setStatus("Couldn't find the bench row in this image.", true);
           return;
         }
-        const { bench, circleRegion, client } = layout;
+        const client = read.client;
+        const { bench, circleRegion } = client.hints;
 
         const stage0 = document.createElement("div");
         stage0.className = "stage";
@@ -564,16 +512,8 @@
         stage1.innerHTML = `<h2>1 · Detection (bandH ${bench.bandH.toFixed(
           0,
         )}, ${bench.slots.length} slots)</h2>`;
-        const perSlot = bench.slots.map((s) => ({
-          slot: s,
-          d: debugMatch(buf, W, H, s),
-        }));
-        const circles = (
-          detectTeamCirclesIn(buf, W, H, circleRegion) || []
-        ).map((c) => ({
-          c,
-          d: debugMatchCircle(buf, W, H, c),
-        }));
+        const benchSlots = read.benchSlots; // [{ spot, m, verdict }], bench order
+        const circles = read.pickCircles; // [{ spot, m, verdict }], top-to-bottom
         const vColor = (v) =>
           v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373";
         const overlay = document.createElement("canvas");
@@ -582,14 +522,36 @@
         const octx = overlay.getContext("2d");
         octx.drawImage(canvas, 0, 0);
         octx.lineWidth = 2;
-        perSlot.forEach(({ d }) => {
-          octx.strokeStyle = vColor(classifyMatch(d.top[0]));
-          octx.strokeRect(d.x0, d.y0, d.size, d.size);
+        // Exactly the app's focus-overlay rule (scan-ui paintLivePreview): a
+        // MATCHED spot draws where the icon actually locked on (m.pos, the
+        // matcher's winning crop); an EMPTY/reject spot has no art to snap to,
+        // so it stays on the clean grid cell (spot.cx/cy/size).
+        const boxOf = (p) =>
+          p.verdict !== "reject" && p.m && p.m.pos
+            ? p.m.pos
+            : {
+                x0: Math.round(p.spot.cx - p.spot.size / 2),
+                y0: Math.round(p.spot.cy - p.spot.size / 2),
+                size: p.spot.size,
+              };
+        benchSlots.forEach((p) => {
+          const b = boxOf(p);
+          octx.strokeStyle = vColor(p.verdict);
+          octx.strokeRect(b.x0, b.y0, b.size, b.size);
         });
-        circles.forEach(({ c, d }) => {
-          octx.strokeStyle = vColor(classifyCircleMatch(d.top[0]));
+        // Circles get an arc (clearer for round portraits) at the same box's
+        // center; r = half the square's diagonal ≈ side/√2.
+        circles.forEach((p) => {
+          const b = boxOf(p);
+          octx.strokeStyle = vColor(p.verdict);
           octx.beginPath();
-          octx.arc(c.cx, c.cy, c.size * 0.72, 0, Math.PI * 2);
+          octx.arc(
+            b.x0 + b.size / 2,
+            b.y0 + b.size / 2,
+            b.size * 0.707,
+            0,
+            Math.PI * 2,
+          );
           octx.stroke();
         });
         const wrap = document.createElement("div");
@@ -606,16 +568,76 @@
         );
         out.appendChild(stage1);
 
+        // Stage 1½: layout verification — does the located bench actually hold
+        // together as champion select? verifyLayout keys off the EMPTY slots
+        // (near-uniform panels, low fill std), not the champion matches, and
+        // rejects a bench with champions after a gap or unexplained slots.
+        // The verdict is the pipeline's own — runFrameRead already ran
+        // verifyLayout over these same benchSlots/pickCircles (it's what the live
+        // state machine steps back on). We just display read.verify.
+        const verdict = read.verify;
+
+        const stageV = document.createElement("div");
+        stageV.className = "stage";
+        stageV.innerHTML = "<h2>1½ · Layout verification (verifyLayout)</h2>";
+        const banner = document.createElement("div");
+        banner.className = "slot " + (verdict.ok ? "accept" : "reject");
+        banner.style.width = "100%";
+        banner.style.opacity = "1";
+        banner.innerHTML =
+          `<div class="verdict">${
+            verdict.ok ? "verified — this is champion select" : "rejected"
+          }</div>` +
+          `<div class="metrics">${
+            verdict.reason ? "reason: <b>" + verdict.reason + "</b> · " : ""
+          }explained <b>${(verdict.explained * 100).toFixed(
+            0,
+          )}%</b> · champions <b>${verdict.champions}</b> · empty <b>${
+            verdict.empty
+          }</b> · unexplained <b>${verdict.unexplained}</b> · after-gap <b>${
+            verdict.afterGap
+          }</b> · circles <b>${verdict.circles}</b></div>`;
+        stageV.appendChild(banner);
+        const occColor = (k) =>
+          k === "champion" ? "#c89b3c" : k === "empty" ? "#4dd0e1" : "#e57373";
+        const occRow = document.createElement("div");
+        occRow.className = "slots";
+        occRow.style.marginTop = "12px";
+        benchSlots.forEach((p, i) => {
+          const kind = classifySlotOccupancy(p);
+          const cell = document.createElement("div");
+          cell.className = "slot";
+          cell.style.width = "128px";
+          cell.style.borderLeftColor = occColor(kind);
+          const fill = p.m && p.m.fill != null ? p.m.fill.toFixed(1) : "—";
+          cell.innerHTML =
+            `<div class="verdict" style="color:${occColor(
+              kind,
+            )}">slot ${i} · ${kind}</div>` +
+            `<div class="metrics">fill std <b>${fill}</b><br>${
+              p.verdict !== "reject" && p.m ? "→ <b>" + p.m.id + "</b>" : "—"
+            }</div>`;
+          occRow.appendChild(cell);
+        });
+        stageV.appendChild(occRow);
+        stageV.insertAdjacentHTML(
+          "beforeend",
+          `<div class="legend">
+             <span><i class="dot" style="background:#c89b3c"></i>champion (matched)</span>
+             <span><i class="dot" style="background:#4dd0e1"></i>empty (fill std &lt; ${VERIFY_EMPTY_FILL})</span>
+             <span><i class="dot" style="background:#e57373"></i>unexplained (geometry off)</span>
+           </div>`,
+        );
+        out.appendChild(stageV);
+
         // Stage 2: per-slot breakdown
         const stage2 = document.createElement("div");
         stage2.className = "stage";
         stage2.innerHTML = "<h2>2 · Per-slot match</h2>";
         const slots = document.createElement("div");
         slots.className = "slots";
-        perSlot.forEach(({ d }, i) => {
-          slots.appendChild(
-            matchCard(canvas, d, `slot ${i}`, classifyMatch(d.top[0])),
-          );
+        benchSlots.forEach((p, i) => {
+          slots.appendChild(matchCard(canvas, p, `slot ${i}`));
         });
         stage2.appendChild(slots);
         out.appendChild(stage2);
@@ -627,27 +649,21 @@
           stage3.innerHTML = `<h2>3 · Team-pick circles (${circles.length})</h2>`;
           const wrap3 = document.createElement("div");
           wrap3.className = "slots";
-          circles.forEach(({ d }, i) => {
-            wrap3.appendChild(
-              matchCard(
-                canvas,
-                d,
-                `circle ${i}`,
-                classifyCircleMatch(d.top[0]),
-              ),
-            );
+          circles.forEach((p, i) => {
+            wrap3.appendChild(matchCard(canvas, p, `circle ${i}`));
           });
           stage3.appendChild(wrap3);
           out.appendChild(stage3);
         }
 
-        const benchIds = perSlot
-          .filter((p) => classifyMatch(p.d.top[0]) !== "reject")
-          .map((p) => p.d.top[0].id);
+        // The pipeline already deduped bench-first into read.ids.
+        const benchIds = benchSlots
+          .filter((p) => p.verdict !== "reject" && p.m)
+          .map((p) => p.m.id);
         const circleIds = circles
-          .filter((p) => classifyCircleMatch(p.d.top[0]) !== "reject")
-          .map((p) => p.d.top[0].id);
-        const all = [...new Set([...benchIds, ...circleIds])];
+          .filter((p) => p.verdict !== "reject" && p.m)
+          .map((p) => p.m.id);
+        const all = read.ids;
         setStatus(
           `Detected ${all.length} (bench ${benchIds.length} + circles ${
             circleIds.length

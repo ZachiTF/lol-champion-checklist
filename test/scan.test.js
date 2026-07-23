@@ -111,6 +111,36 @@ test("empty slots sit far from any champion in color space", () => {
   }
 });
 
+test("matchSlot returns the winning crop position (m.pos) within the search window", () => {
+  bench.slots.forEach((slot, i) => {
+    const m = results[i].m;
+    assert.ok(m && m.pos, "every slot match carries a winning crop pos");
+    const s = slot.size || 52;
+    const off = Math.max(6, Math.round(s * 0.22));
+    assert.ok(
+      m.pos.size >= s - 6 && m.pos.size <= s + 6,
+      `pos.size ${m.pos.size} outside searched range`,
+    );
+    const cx = m.pos.x0 + m.pos.size / 2;
+    const cy = m.pos.y0 + m.pos.size / 2;
+    assert.ok(
+      Math.abs(cx - slot.cx) <= off + 1 && Math.abs(cy - slot.cy) <= off + 1,
+      `pos center (${cx},${cy}) drifted past the ±${off} window of (${slot.cx},${slot.cy})`,
+    );
+  });
+});
+
+test("opts.debug attaches the winning crop's hash/sig; default keeps them off", () => {
+  const slot = bench.slots[0];
+  const plain = core.matchSlot(buf, W, H, slot, iconHashById);
+  assert.ok(plain.pos, "pos is returned even without debug");
+  assert.equal(plain.hash, undefined);
+  assert.equal(plain.sig, undefined);
+  const dbg = core.matchSlot(buf, W, H, slot, iconHashById, { debug: true });
+  assert.equal(typeof dbg.hash, "bigint");
+  assert.equal(dbg.sig.length, 27);
+});
+
 // ---- team-pick circles (the 5 locked champions down the left) ----
 const circles = core.detectTeamCircles(buf, W, H, iconHashById);
 const circleResults = (circles || []).map((c) => {
@@ -134,6 +164,21 @@ test("identifies all five team-pick champions, top to bottom", () => {
 test("bench and circles together produce the full visible roster", () => {
   const all = [...new Set([...detected, ...circleIds])];
   assert.equal(all.length, EXPECTED.length + EXPECTED_CIRCLES.length);
+});
+
+test("matchCircle returns the winning crop position within its search window", () => {
+  (circles || []).forEach((c, i) => {
+    const m = circleResults[i].m;
+    assert.ok(m && m.pos, "every circle match carries a winning crop pos");
+    const f = c.size / 48;
+    const off = Math.max(9, Math.round(9 * f));
+    const cx = m.pos.x0 + m.pos.size / 2;
+    const cy = m.pos.y0 + m.pos.size / 2;
+    assert.ok(
+      Math.abs(cx - c.cx) <= off + 1 && Math.abs(cy - c.cy) <= off + 1,
+      `circle pos center (${cx},${cy}) drifted past the ±${off} window`,
+    );
+  });
 });
 
 // ---- modular pipeline (Frame → ClientFinder → SlotProvider → IconMatcher) ----

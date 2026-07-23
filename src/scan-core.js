@@ -497,6 +497,12 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
   const sizes = tight
     ? tc.ds.map((d) => s + d)
     : [s - 6, s - 3, s, s + 3, s + 6];
+  // Track the single crop that produced the overall best (lowest) score — the
+  // winner's actual pixel position. Returned as `pos` so callers (the live focus
+  // overlay, the pipeline debugger) can draw the box where the icon really is,
+  // not just at the nominal grid cell. `debug` also keeps that crop's hash/sig.
+  let win = null,
+    winScore = Infinity;
   for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
@@ -527,6 +533,10 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
           const prev = per.get(id);
           if (!prev || score < prev.score)
             per.set(id, { id, ham: cands[i].d, color: c, score });
+          if (score < winScore) {
+            winScore = score;
+            win = { x0, y0, size, h, sig };
+          }
         }
       }
     }
@@ -537,6 +547,13 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
   // Occupancy of the slot itself (independent of which champion won) so
   // classifyMatch can tell a shadowed-but-filled slot from an empty one.
   best.fill = fillStd(buf, W, H, slot.cx, slot.cy, s);
+  if (win) {
+    best.pos = { x0: win.x0, y0: win.y0, size: win.size };
+    if (opts && opts.debug) {
+      best.hash = win.h;
+      best.sig = win.sig;
+    }
+  }
   return best;
 }
 
@@ -774,6 +791,11 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   const sizes = tight
     ? [s - dsT, s, s + dsT]
     : [s - 2 * ds, s - ds, s, s + ds, s + 2 * ds];
+  // Winning crop, as in matchSlot: returned as `pos` for the focus overlay so a
+  // circle is drawn centered on the portrait it locked onto, not the rough
+  // saturation-centroid detection. `debug` keeps that crop's hash/sig too.
+  let win = null,
+    winScore = Infinity;
   for (const size of sizes) {
     if (size < 16) continue;
     for (let dx = -off; dx <= off; dx += step) {
@@ -794,13 +816,25 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
           const prev = per.get(id);
           if (!prev || score < prev.score)
             per.set(id, { id, ham: cands[i].d, color: c, score });
+          if (score < winScore) {
+            winScore = score;
+            win = { x0, y0, size, h, sig };
+          }
         }
       }
     }
   }
   if (!per.size) return null;
   const ranked = [...per.values()].sort((a, b) => a.score - b.score);
-  return { ...ranked[0], alts: ranked.slice(0, 4) };
+  const best = { ...ranked[0], alts: ranked.slice(0, 4) };
+  if (win) {
+    best.pos = { x0: win.x0, y0: win.y0, size: win.size };
+    if (opts && opts.debug) {
+      best.hash = win.h;
+      best.sig = win.sig;
+    }
+  }
+  return best;
 }
 
 // Team circles are always real champions (a full ARAM team is 5), so there is no
@@ -1189,7 +1223,8 @@ function toSpotMatch(spot, m, verdict) {
 /** @type {IconMatcher} */
 function perceptualMatcher(frame, spots, ctx) {
   const { buf, W, H } = frame;
-  const opts = ctx.tight ? { tight: true } : undefined;
+  // Always an object so `debug` can ride alongside `tight`; both default off.
+  const opts = { tight: !!(ctx && ctx.tight), debug: !!(ctx && ctx.debug) };
   return spots.map((spot) => {
     if (spot.kind === "circle") {
       const m = matchCircle(buf, W, H, spot, ctx.iconHashById, opts);

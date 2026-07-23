@@ -1028,7 +1028,14 @@ function paintLivePreview() {
       if (!s) continue;
       g.strokeStyle = FOCUS_COLORS[p.verdict] || FOCUS_COLORS.reject;
       g.lineWidth = p.verdict === "reject" ? lw : lw * 1.7;
-      g.strokeRect(s.cx - s.size / 2, s.cy - s.size / 2, s.size, s.size);
+      // A matched spot draws where the icon actually locked on (matchSlot/
+      // matchCircle's winning crop); an empty/reject spot has no art to snap
+      // to, so it stays on the clean grid cell.
+      const pos =
+        p.verdict !== "reject" && p.m && p.m.pos
+          ? p.m.pos
+          : { x0: s.cx - s.size / 2, y0: s.cy - s.size / 2, size: s.size };
+      g.strokeRect(pos.x0, pos.y0, pos.size, pos.size);
     }
   };
   stroke(f.bench);
