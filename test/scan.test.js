@@ -331,7 +331,8 @@ test("benchAnchoredClient returns null on a frame with no champ select", () => {
 
 test("ARAM pipeline yields an empty read (no throw) on a blank frame", () => {
   const r = core.runFrameRead(core.pipelineForMode("aram"), blank, ctx);
-  assert.deepEqual(r, { client: null });
+  assert.equal(r.client, null);
+  assert.deepEqual(Object.keys(r).sort(), ["client", "timings"]);
 });
 
 test("pipeline.run short-circuits cleanly when no client is found", () => {
@@ -903,6 +904,25 @@ test("runFrameRead reports verification alongside the read", () => {
   assert.ok(r.verify, "runFrameRead should carry a verify result");
   assert.ok(r.verify.ok, `real frame should verify — ${r.verify.reason}`);
   assert.equal(r.verify.circles, 5);
+});
+
+test("runFrameRead reports per-stage timings (locate vs. match)", () => {
+  const r = core.runFrameRead(core.pipelineForMode("aram"), { buf, W, H }, ctx);
+  assert.ok(r.timings, "runFrameRead should carry timings");
+  for (const k of ["locateMs", "matchMs", "totalMs"]) {
+    assert.equal(typeof r.timings[k], "number", `${k} should be a number`);
+    assert.ok(r.timings[k] >= 0, `${k} should be non-negative`);
+  }
+  // A cached client short-circuits the finder, so locate should cost ~nothing.
+  const cached = core.runFrameRead(
+    core.pipelineForMode("aram"),
+    { buf, W, H },
+    { ...ctx, client: r.client },
+  );
+  assert.ok(
+    cached.timings.locateMs <= r.timings.locateMs,
+    "cached-client read should not re-pay the locate cost",
+  );
 });
 
 // ---- temporal consensus across live frames (identity, recent window) ----

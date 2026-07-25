@@ -1021,21 +1021,36 @@ function paintLivePreview() {
   g.strokeStyle = "rgba(200, 155, 60, 0.85)";
   g.strokeRect(f.client.x, f.client.y, f.client.w, f.client.h);
   g.setLineDash([]);
-  // Per-spot boxes, colored by verdict (empty/reject slots stay faint).
+  // Per-spot boxes, colored by verdict (empty/reject slots stay faint). Two marks:
+  // the SOLID box is always the nominal grid cell (spot.cx/cy/size), so the overlay
+  // tiles evenly on the bench pitch; the DASHED box, drawn only when the matcher's
+  // winning crop (m.pos) drifted off that cell, shows where the icon actually
+  // locked on. Keeping them separate turns the drift into readable information
+  // instead of a box that straddles the neighbouring icon.
   const stroke = (list) => {
     for (const p of list || []) {
       const s = p.spot;
       if (!s) continue;
-      g.strokeStyle = FOCUS_COLORS[p.verdict] || FOCUS_COLORS.reject;
+      const color = FOCUS_COLORS[p.verdict] || FOCUS_COLORS.reject;
+      const gx = s.cx - s.size / 2,
+        gy = s.cy - s.size / 2;
+      g.strokeStyle = color;
       g.lineWidth = p.verdict === "reject" ? lw : lw * 1.7;
-      // A matched spot draws where the icon actually locked on (matchSlot/
-      // matchCircle's winning crop); an empty/reject spot has no art to snap
-      // to, so it stays on the clean grid cell.
-      const pos =
-        p.verdict !== "reject" && p.m && p.m.pos
-          ? p.m.pos
-          : { x0: s.cx - s.size / 2, y0: s.cy - s.size / 2, size: s.size };
-      g.strokeRect(pos.x0, pos.y0, pos.size, pos.size);
+      g.setLineDash([]);
+      g.strokeRect(gx, gy, s.size, s.size);
+      const snap = p.verdict !== "reject" && p.m && p.m.pos;
+      if (snap) {
+        const drift =
+          Math.abs(snap.x0 - gx) +
+          Math.abs(snap.y0 - gy) +
+          Math.abs(snap.size - s.size);
+        if (drift > 1.5) {
+          g.lineWidth = lw;
+          g.setLineDash([lw * 3, lw * 2]);
+          g.strokeRect(snap.x0, snap.y0, snap.size, snap.size);
+          g.setLineDash([]);
+        }
+      }
     }
   };
   stroke(f.bench);

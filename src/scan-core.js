@@ -1236,6 +1236,12 @@ function perceptualMatcher(frame, spots, ctx) {
 }
 
 // ---- Pipeline + mode registry ----------------------------------------------
+// High-resolution clock where available (browser/worker), Date.now in Node tests.
+const perfNow =
+  typeof performance !== "undefined" && performance.now
+    ? () => performance.now()
+    : () => Date.now();
+
 /**
  * @param {{ findClient:ClientFinder, provideSlots:SlotProvider, matchIcons:IconMatcher }} stages
  */
@@ -1246,12 +1252,28 @@ function createPipeline({ findClient, provideSlots, matchIcons }) {
     matchIcons,
     // A cached ClientRect on ctx.client short-circuits the finder for fast live
     // reads on a pixel-stable frame; provideSlots still re-runs (picks fill in).
+    // `timings` splits the two heavy stages (locate vs. match) so the debugger can
+    // show where a frame's time goes; a cached client makes locateMs ~0.
     run(frame, ctx) {
+      const t0 = perfNow();
       const c = (ctx && ctx.client) || findClient(frame, ctx);
-      if (!c) return { client: null, spots: [], matches: [] };
+      const t1 = perfNow();
+      if (!c)
+        return {
+          client: null,
+          spots: [],
+          matches: [],
+          timings: { locateMs: t1 - t0, matchMs: 0, totalMs: t1 - t0 },
+        };
       const spots = provideSlots(frame, c, ctx);
       const matches = matchIcons(frame, spots, ctx);
-      return { client: c, spots, matches };
+      const t2 = perfNow();
+      return {
+        client: c,
+        spots,
+        matches,
+        timings: { locateMs: t1 - t0, matchMs: t2 - t1, totalMs: t2 - t0 },
+      };
     },
   };
 }
@@ -1285,8 +1307,8 @@ function pipelineForMode(modeId, overrides) {
 // readBench + readPicks + combineReads exactly: bench-first dedup, uncertain
 // carries from either source, filledSlots covers every non-reject bench slot.
 function runFrameRead(pipeline, frame, ctx) {
-  const { client, matches } = pipeline.run(frame, ctx);
-  if (!client) return { client: null };
+  const { client, matches, timings } = pipeline.run(frame, ctx);
+  if (!client) return { client: null, timings };
   const benchM = matches.filter((x) => x.spot.kind !== "circle");
   const circleM = matches.filter((x) => x.spot.kind === "circle");
   const ids = [];
@@ -1309,6 +1331,8 @@ function runFrameRead(pipeline, frame, ctx) {
     benchCount,
     picks,
     filledSlots,
+    // Per-stage timing (locate vs. match ms); additive — the app/worker ignore it.
+    timings,
     // Is this really champion select, or did we lock onto / drift off something
     // else? The live loop steps its state machine back to re-locate when this
     // fails on consecutive frames (see verifyLayout).
