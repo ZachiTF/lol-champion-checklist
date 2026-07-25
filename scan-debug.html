@@ -495,6 +495,127 @@
         return wrap;
       }
 
+      // A 1-D edge projection as a sparkline, with gold ticks at the detected
+      // cell borders — so you can see WHY a pitch/count was chosen (or missed).
+      function projCanvas(P, marks, w, h) {
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const g = c.getContext("2d");
+        g.fillStyle = "#0b0e14";
+        g.fillRect(0, 0, w, h);
+        let max = 0;
+        for (const v of P) if (v > max) max = v;
+        if (max <= 0) max = 1;
+        const sc = w / P.length;
+        g.strokeStyle = "#4dd0e1";
+        g.beginPath();
+        for (let i = 0; i < P.length; i++) {
+          const x = i * sc,
+            y = h - (P[i] / max) * (h - 2);
+          i ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+        g.stroke();
+        g.strokeStyle = "rgba(200, 155, 60, 0.7)";
+        for (const m of marks || []) {
+          g.beginPath();
+          g.moveTo(m * sc, 0);
+          g.lineTo(m * sc, h);
+          g.stroke();
+        }
+        return c;
+      }
+
+      // Stage G — the generic, identity-free grid detector (scan-core detectGrids).
+      // Runs on ANY frame (independent of the ARAM pipeline), so it also visualizes
+      // champion grids on non-champ-select screens (e.g. the challenge modal).
+      function renderGridStage(srcCanvas, buf, W, H) {
+        const { grids, diags } = detectGrids({ buf, W, H }, { debug: true });
+        const d = diags[0] || {};
+        const g0 = grids[0];
+        const stage = document.createElement("div");
+        stage.className = "stage";
+        stage.innerHTML = `<h2>G · Generic grid structure (identity-free)${
+          g0
+            ? ` — ${g0.cols}×${g0.rows}, pitch ${g0.pitchX}/${g0.pitchY}, size ${g0.size}`
+            : " — none found"
+        }</h2>`;
+        const overlay = document.createElement("canvas");
+        overlay.width = W;
+        overlay.height = H;
+        const octx = overlay.getContext("2d");
+        octx.drawImage(srcCanvas, 0, 0);
+        octx.lineWidth = Math.max(2, Math.round(W / 600));
+        octx.strokeStyle = "#e879f9";
+        for (const g of grids)
+          for (const cell of g.cells)
+            octx.strokeRect(
+              cell.cx - cell.size / 2,
+              cell.cy - cell.size / 2,
+              cell.size,
+              cell.size,
+            );
+        const wrap = document.createElement("div");
+        wrap.className = "overlay-wrap";
+        wrap.appendChild(overlay);
+        stage.appendChild(wrap);
+        if (d.Cx || d.Cy) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const marksX = g0
+            ? Array.from(
+                { length: g0.cols + 1 },
+                (_, c) => g0.x0 + c * g0.pitchX,
+              )
+            : [];
+          const marksY = g0
+            ? Array.from(
+                { length: g0.rows + 1 },
+                (_, r) => g0.y0 + r * g0.pitchY,
+              )
+            : [];
+          const spark = (P, marks, cap) => {
+            const box = document.createElement("div");
+            box.appendChild(projCanvas(P, marks, 520, 80));
+            box.insertAdjacentHTML(
+              "beforeend",
+              `<div class="cap">${cap}</div>`,
+            );
+            return box;
+          };
+          if (d.Cx)
+            row.appendChild(
+              spark(
+                d.Cx,
+                marksX,
+                `column edges → pitchX ${d.px ? d.px.pitch : "-"} (str ${
+                  d.px ? d.px.strength.toFixed(2) : "-"
+                })`,
+              ),
+            );
+          if (d.Cy)
+            row.appendChild(
+              spark(
+                d.Cy,
+                marksY,
+                `row edges → pitchY ${d.py ? d.py.pitch : "-"} (str ${
+                  d.py && d.py.strength ? d.py.strength.toFixed(2) : "-"
+                })`,
+              ),
+            );
+          stage.appendChild(row);
+        }
+        stage.insertAdjacentHTML(
+          "beforeend",
+          `<div class="legend">
+             <span><i class="dot" style="background:#e879f9"></i>generic grid cells</span>
+             <span><i class="dot" style="background:#4dd0e1"></i>edge projection</span>
+             <span>gold ticks = detected cell borders</span>
+           </div>`,
+        );
+        out.appendChild(stage);
+      }
+
       // Rasterize a dropped/pasted Image, then hand off to renderFrame.
       function render(img) {
         const W = img.naturalWidth,
@@ -514,6 +635,10 @@
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         const buf = ctx.getImageData(0, 0, W, H).data;
 
+        // Structure-first: show the generic grid detector on EVERY frame, before
+        // the ARAM-specific pipeline (which may find no bench on other screens).
+        renderGridStage(canvas, buf, W, H);
+
         // Run the EXACT pipeline the app uses (aram mode): benchAnchoredClient →
         // aramSlots → perceptualMatcher, reduced by runFrameRead. ctx.debug asks
         // matchSlot/matchCircle to also hand back each winner's crop hash/sig for
@@ -527,7 +652,7 @@
         if (!read.client) {
           const t = read.timings;
           setStatus(
-            "Couldn't find the bench row in this image." +
+            "No ARAM bench here — see the generic grid structure above." +
               (t ? ` (locate ${t.locateMs.toFixed(0)}ms)` : ""),
             true,
           );
