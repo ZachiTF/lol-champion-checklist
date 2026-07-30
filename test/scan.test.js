@@ -331,7 +331,8 @@ test("benchAnchoredClient returns null on a frame with no champ select", () => {
 
 test("ARAM pipeline yields an empty read (no throw) on a blank frame", () => {
   const r = core.runFrameRead(core.pipelineForMode("aram"), blank, ctx);
-  assert.deepEqual(r, { client: null });
+  assert.equal(r.client, null);
+  assert.deepEqual(Object.keys(r).sort(), ["client", "timings"]);
 });
 
 test("pipeline.run short-circuits cleanly when no client is found", () => {
@@ -903,6 +904,59 @@ test("runFrameRead reports verification alongside the read", () => {
   assert.ok(r.verify, "runFrameRead should carry a verify result");
   assert.ok(r.verify.ok, `real frame should verify — ${r.verify.reason}`);
   assert.equal(r.verify.circles, 5);
+});
+
+test("runFrameRead reports per-stage timings (locate vs. match)", () => {
+  const r = core.runFrameRead(core.pipelineForMode("aram"), { buf, W, H }, ctx);
+  assert.ok(r.timings, "runFrameRead should carry timings");
+  for (const k of ["locateMs", "matchMs", "totalMs"]) {
+    assert.equal(typeof r.timings[k], "number", `${k} should be a number`);
+    assert.ok(r.timings[k] >= 0, `${k} should be non-negative`);
+  }
+  // A cached client short-circuits the finder, so locate should cost ~nothing.
+  const cached = core.runFrameRead(
+    core.pipelineForMode("aram"),
+    { buf, W, H },
+    { ...ctx, client: r.client },
+  );
+  assert.ok(
+    cached.timings.locateMs <= r.timings.locateMs,
+    "cached-client read should not re-pay the locate cost",
+  );
+});
+
+// ---- generic grid-structure detection (identity-free) ----
+// The structure-first layer: find a periodic square-cell grid WITHOUT the champion
+// database, so a scenario matcher can decide what the grid is by shape/position.
+test("autocorrPitch recovers the period of a synthetic comb", () => {
+  const P = new Float64Array(600);
+  for (let i = 0; i < 600; i += 40) P[i] = 1;
+  const r = core.autocorrPitch(P, 24, 220);
+  assert.equal(r.pitch, 40, "dominant period is the comb spacing");
+  assert.ok(r.strength > 0.5, `should be a strong period, got ${r.strength}`);
+});
+
+test("combPhaseCount counts cells between strong borders", () => {
+  const P = new Float64Array(600);
+  for (const b of [50, 110, 170, 230, 290]) P[b] = 10; // 5 borders → 4 cells
+  const r = core.combPhaseCount(P, 60);
+  assert.equal(r.count, 4);
+  assert.ok(Math.abs(r.origin - 50) <= 2, `origin near 50, got ${r.origin}`);
+});
+
+test("detectGrids finds the bench as a single row of ~59px cells", () => {
+  // The bench sits in the top strip; restricting the band is the localization job
+  // a position-prior detector will own — here we verify the geometry it recovers.
+  const { grids } = core.detectGrids(
+    { buf, W, H },
+    { region: { x: 300, y: 0, w: 700, h: 90 } },
+  );
+  assert.ok(grids.length, "a grid should be found in the bench band");
+  const g = grids[0];
+  assert.ok(g.pitchX >= 54 && g.pitchX <= 64, `pitchX ~59, got ${g.pitchX}`);
+  assert.equal(g.rows, 1, "the bench is a single row");
+  assert.ok(g.cols >= 3, `several columns, got ${g.cols}`);
+  assert.equal(g.source, "projection");
 });
 
 // ---- temporal consensus across live frames (identity, recent window) ----

@@ -189,6 +189,40 @@
         vertical-align: middle;
         margin-right: 4px;
       }
+      .live {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .live button {
+        background: var(--card);
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font: inherit;
+      }
+      .live button:hover:not(:disabled) {
+        border-color: var(--gold);
+      }
+      .live button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      #livestage {
+        background: #000;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 16px;
+        overflow-x: auto;
+      }
+      #livecanvas {
+        max-width: 100%;
+        display: block;
+      }
     </style>
   </head>
   <body>
@@ -199,13 +233,29 @@
       <a href="src/scan-core.js">src/scan-core.js</a>: locate the client/bench/
       circles anywhere at any scale → 10-slot grid → per-slot local search →
       dHash + color-signature match → verify the layout holds together as
-      champion select → verdict.
+      champion select → verdict. Or <strong>Go live</strong> to share your
+      screen and watch the overlay track champ select in real time — then
+      Freeze/Step to pull the full breakdown (with per-stage timing) for any
+      frame.
     </p>
 
     <div id="drop" class="drop">
       <strong>Drop</strong> a screenshot here, <strong>paste</strong> with
       Ctrl+V, or <input type="file" accept="image/*" id="file" />
     </div>
+
+    <div id="live" class="live">
+      <button id="golive" type="button">📹 Go live</button>
+      <span id="livectrls" hidden>
+        <button id="freeze" type="button">⏸ Freeze &amp; analyze</button>
+        <button id="step" type="button" disabled>⏭ Step</button>
+        <button id="resume" type="button" disabled>▶ Resume</button>
+        <button id="export" type="button" disabled>⬇ Export frame</button>
+        <button id="stoplive" type="button">✕ Stop</button>
+      </span>
+    </div>
+    <div id="livestage" hidden><canvas id="livecanvas"></canvas></div>
+
     <div id="status">Loading champion database…</div>
 
     <div id="out"></div>
@@ -242,6 +292,30 @@
         const cx = c.getContext("2d", { willReadFrequently: true });
         cx.drawImage(img, 0, 0, w, h);
         return cx.getImageData(0, 0, w, h).data;
+      }
+
+      // Verdict → color, shared by the stage-1 overlay and the live preview.
+      const vColor = (v) =>
+        v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373";
+      // Box rule shared by the live overlay and the stage-1 breakdown: the grid
+      // cell (spot.cx/cy/size) is the clean tiling mark; the winning crop (m.pos)
+      // is a drift mark, returned only when it actually moved off the cell.
+      function gridBoxOf(p) {
+        return {
+          x0: Math.round(p.spot.cx - p.spot.size / 2),
+          y0: Math.round(p.spot.cy - p.spot.size / 2),
+          size: p.spot.size,
+        };
+      }
+      function snapBoxOf(p) {
+        if (p.verdict === "reject" || !p.m || !p.m.pos) return null;
+        const g = gridBoxOf(p),
+          s = p.m.pos;
+        const drift =
+          Math.abs(s.x0 - g.x0) +
+          Math.abs(s.y0 - g.y0) +
+          Math.abs(s.size - g.size);
+        return drift > 1.5 ? s : null;
       }
 
       // Build champion icon hashes live from Data Dragon (cached in localStorage).
@@ -421,16 +495,149 @@
         return wrap;
       }
 
+      // A 1-D edge projection as a sparkline, with gold ticks at the detected
+      // cell borders — so you can see WHY a pitch/count was chosen (or missed).
+      function projCanvas(P, marks, w, h) {
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const g = c.getContext("2d");
+        g.fillStyle = "#0b0e14";
+        g.fillRect(0, 0, w, h);
+        let max = 0;
+        for (const v of P) if (v > max) max = v;
+        if (max <= 0) max = 1;
+        const sc = w / P.length;
+        g.strokeStyle = "#4dd0e1";
+        g.beginPath();
+        for (let i = 0; i < P.length; i++) {
+          const x = i * sc,
+            y = h - (P[i] / max) * (h - 2);
+          i ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+        g.stroke();
+        g.strokeStyle = "rgba(200, 155, 60, 0.7)";
+        for (const m of marks || []) {
+          g.beginPath();
+          g.moveTo(m * sc, 0);
+          g.lineTo(m * sc, h);
+          g.stroke();
+        }
+        return c;
+      }
+
+      // Stage G — the generic, identity-free grid detector (scan-core detectGrids).
+      // Runs on ANY frame (independent of the ARAM pipeline), so it also visualizes
+      // champion grids on non-champ-select screens (e.g. the challenge modal).
+      function renderGridStage(srcCanvas, buf, W, H) {
+        const { grids, diags } = detectGrids({ buf, W, H }, { debug: true });
+        const d = diags[0] || {};
+        const g0 = grids[0];
+        const stage = document.createElement("div");
+        stage.className = "stage";
+        stage.innerHTML = `<h2>G · Generic grid structure (identity-free)${
+          g0
+            ? ` — ${g0.cols}×${g0.rows}, pitch ${g0.pitchX}/${g0.pitchY}, size ${g0.size}`
+            : " — none found"
+        }</h2>`;
+        const overlay = document.createElement("canvas");
+        overlay.width = W;
+        overlay.height = H;
+        const octx = overlay.getContext("2d");
+        octx.drawImage(srcCanvas, 0, 0);
+        octx.lineWidth = Math.max(2, Math.round(W / 600));
+        octx.strokeStyle = "#e879f9";
+        for (const g of grids)
+          for (const cell of g.cells)
+            octx.strokeRect(
+              cell.cx - cell.size / 2,
+              cell.cy - cell.size / 2,
+              cell.size,
+              cell.size,
+            );
+        const wrap = document.createElement("div");
+        wrap.className = "overlay-wrap";
+        wrap.appendChild(overlay);
+        stage.appendChild(wrap);
+        if (d.Cx || d.Cy) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const marksX = g0
+            ? Array.from(
+                { length: g0.cols + 1 },
+                (_, c) => g0.x0 + c * g0.pitchX,
+              )
+            : [];
+          const marksY = g0
+            ? Array.from(
+                { length: g0.rows + 1 },
+                (_, r) => g0.y0 + r * g0.pitchY,
+              )
+            : [];
+          const spark = (P, marks, cap) => {
+            const box = document.createElement("div");
+            box.appendChild(projCanvas(P, marks, 520, 80));
+            box.insertAdjacentHTML(
+              "beforeend",
+              `<div class="cap">${cap}</div>`,
+            );
+            return box;
+          };
+          if (d.Cx)
+            row.appendChild(
+              spark(
+                d.Cx,
+                marksX,
+                `column edges → pitchX ${d.px ? d.px.pitch : "-"} (str ${
+                  d.px ? d.px.strength.toFixed(2) : "-"
+                })`,
+              ),
+            );
+          if (d.Cy)
+            row.appendChild(
+              spark(
+                d.Cy,
+                marksY,
+                `row edges → pitchY ${d.py ? d.py.pitch : "-"} (str ${
+                  d.py && d.py.strength ? d.py.strength.toFixed(2) : "-"
+                })`,
+              ),
+            );
+          stage.appendChild(row);
+        }
+        stage.insertAdjacentHTML(
+          "beforeend",
+          `<div class="legend">
+             <span><i class="dot" style="background:#e879f9"></i>generic grid cells</span>
+             <span><i class="dot" style="background:#4dd0e1"></i>edge projection</span>
+             <span>gold ticks = detected cell borders</span>
+           </div>`,
+        );
+        out.appendChild(stage);
+      }
+
+      // Rasterize a dropped/pasted Image, then hand off to renderFrame.
       function render(img) {
-        out.innerHTML = "";
         const W = img.naturalWidth,
           H = img.naturalHeight;
         const canvas = document.createElement("canvas");
         canvas.width = W;
         canvas.height = H;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        return renderFrame(canvas, W, H);
+      }
+
+      // Full pipeline breakdown for one already-rasterized frame — a dropped image
+      // or a live-capture snapshot. Returns the pipeline read so a live caller can
+      // reuse it for the preview overlay without re-running the pipeline.
+      function renderFrame(canvas, W, H) {
+        out.innerHTML = "";
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0);
         const buf = ctx.getImageData(0, 0, W, H).data;
+
+        // Structure-first: show the generic grid detector on EVERY frame, before
+        // the ARAM-specific pipeline (which may find no bench on other screens).
+        renderGridStage(canvas, buf, W, H);
 
         // Run the EXACT pipeline the app uses (aram mode): benchAnchoredClient →
         // aramSlots → perceptualMatcher, reduced by runFrameRead. ctx.debug asks
@@ -443,17 +650,27 @@
           debug: true,
         });
         if (!read.client) {
-          setStatus("Couldn't find the bench row in this image.", true);
-          return;
+          const t = read.timings;
+          setStatus(
+            "No ARAM bench here — see the generic grid structure above." +
+              (t ? ` (locate ${t.locateMs.toFixed(0)}ms)` : ""),
+            true,
+          );
+          return read;
         }
         const client = read.client;
         const { bench, circleRegion } = client.hints;
+        const tm = read.timings || { locateMs: 0, matchMs: 0, totalMs: 0 };
 
         const stage0 = document.createElement("div");
         stage0.className = "stage";
         stage0.innerHTML = `<h2>0 · Locate (client ${Math.round(
           client.w,
-        )}×${Math.round(client.h)}, pitch ${bench.pitch})</h2>`;
+        )}×${Math.round(client.h)}, pitch ${
+          bench.pitch
+        }) · locate ${tm.locateMs.toFixed(0)}ms · match ${tm.matchMs.toFixed(
+          0,
+        )}ms · total ${tm.totalMs.toFixed(0)}ms</h2>`;
         const loc = document.createElement("canvas");
         loc.width = W;
         loc.height = H;
@@ -514,36 +731,37 @@
         )}, ${bench.slots.length} slots)</h2>`;
         const benchSlots = read.benchSlots; // [{ spot, m, verdict }], bench order
         const circles = read.pickCircles; // [{ spot, m, verdict }], top-to-bottom
-        const vColor = (v) =>
-          v === "accept" ? "#81c784" : v === "maybe" ? "#ffd54f" : "#e57373";
         const overlay = document.createElement("canvas");
         overlay.width = W;
         overlay.height = H;
         const octx = overlay.getContext("2d");
         octx.drawImage(canvas, 0, 0);
         octx.lineWidth = 2;
-        // Exactly the app's focus-overlay rule (scan-ui paintLivePreview): a
-        // MATCHED spot draws where the icon actually locked on (m.pos, the
-        // matcher's winning crop); an EMPTY/reject spot has no art to snap to,
-        // so it stays on the clean grid cell (spot.cx/cy/size).
-        const boxOf = (p) =>
-          p.verdict !== "reject" && p.m && p.m.pos
-            ? p.m.pos
-            : {
-                x0: Math.round(p.spot.cx - p.spot.size / 2),
-                y0: Math.round(p.spot.cy - p.spot.size / 2),
-                size: p.spot.size,
-              };
+        // Same rule as the app's live overlay (scan-ui paintLivePreview): the SOLID
+        // box is the nominal grid cell (tiles cleanly on the pitch); the DASHED box
+        // is the matcher's winning crop (m.pos), drawn only when it drifted off the
+        // cell — so drift reads as information, not a box straddling its neighbour.
+        const dashed = (fn) => {
+          octx.save();
+          octx.setLineDash([6, 4]);
+          octx.lineWidth = 1.5;
+          fn();
+          octx.restore();
+        };
         benchSlots.forEach((p) => {
-          const b = boxOf(p);
+          const b = gridBoxOf(p);
           octx.strokeStyle = vColor(p.verdict);
           octx.strokeRect(b.x0, b.y0, b.size, b.size);
+          const s = snapBoxOf(p);
+          if (s)
+            dashed(() => {
+              octx.strokeStyle = vColor(p.verdict);
+              octx.strokeRect(s.x0, s.y0, s.size, s.size);
+            });
         });
-        // Circles get an arc (clearer for round portraits) at the same box's
-        // center; r = half the square's diagonal ≈ side/√2.
-        circles.forEach((p) => {
-          const b = boxOf(p);
-          octx.strokeStyle = vColor(p.verdict);
+        // Circles get an arc (clearer for round portraits); r ≈ side/√2. Solid at
+        // the grid center, dashed at the snapped center when it drifted.
+        const arc = (b) => {
           octx.beginPath();
           octx.arc(
             b.x0 + b.size / 2,
@@ -553,6 +771,16 @@
             Math.PI * 2,
           );
           octx.stroke();
+        };
+        circles.forEach((p) => {
+          octx.strokeStyle = vColor(p.verdict);
+          arc(gridBoxOf(p));
+          const s = snapBoxOf(p);
+          if (s)
+            dashed(() => {
+              octx.strokeStyle = vColor(p.verdict);
+              arc(s);
+            });
         });
         const wrap = document.createElement("div");
         wrap.className = "overlay-wrap";
@@ -564,6 +792,7 @@
              <span><i class="dot" style="background:#81c784"></i>accept</span>
              <span><i class="dot" style="background:#ffd54f"></i>maybe (flagged)</span>
              <span><i class="dot" style="background:#e57373"></i>reject (empty slot)</span>
+             <span>solid = grid cell · dashed = matcher drift (m.pos)</span>
            </div>`,
         );
         out.appendChild(stage1);
@@ -669,6 +898,7 @@
             circleIds.length
           }): ${all.join(", ")}`,
         );
+        return read;
       }
 
       async function handleFile(file) {
@@ -705,6 +935,196 @@
         for (const it of e.clipboardData?.items || [])
           if (it.type.startsWith("image/")) return handleFile(it.getAsFile());
       });
+
+      // ---- live screen capture -------------------------------------------------
+      // Share the screen/window, watch the overlay track champ select in real time,
+      // then Freeze/Step to run the full breakdown (renderFrame) on a chosen frame.
+      let liveStream = null;
+      let liveVideo = null;
+      let liveFrozen = false;
+      let liveTimer = null;
+      const liveSrcCanvas = document.createElement("canvas"); // native-res grab
+      const LIVE_MAX_W = 900;
+      const $ = (id) => document.getElementById(id);
+
+      // Draw the current video frame into liveSrcCanvas at native resolution.
+      function grabLive() {
+        if (!liveVideo || !liveVideo.videoWidth) return null;
+        const W = liveVideo.videoWidth,
+          H = liveVideo.videoHeight;
+        liveSrcCanvas.width = W;
+        liveSrcCanvas.height = H;
+        liveSrcCanvas
+          .getContext("2d", { willReadFrequently: true })
+          .drawImage(liveVideo, 0, 0, W, H);
+        return { W, H };
+      }
+
+      // Read the pipeline on the frame currently in liveSrcCanvas.
+      function readLive(W, H) {
+        const buf = liveSrcCanvas
+          .getContext("2d", { willReadFrequently: true })
+          .getImageData(0, 0, W, H).data;
+        return runFrameRead(
+          pipelineForMode("aram"),
+          { buf, W, H },
+          { iconHashById, debug: true },
+        );
+      }
+
+      // Paint liveSrcCanvas + the located client rect and per-slot boxes (grid solid,
+      // drift dashed) into the small preview canvas.
+      function paintLive(read, W, H) {
+        const cv = $("livecanvas");
+        const sc = Math.min(1, LIVE_MAX_W / W);
+        const cw = Math.max(1, Math.round(W * sc)),
+          ch = Math.max(1, Math.round(H * sc));
+        if (cv.width !== cw) cv.width = cw;
+        if (cv.height !== ch) cv.height = ch;
+        const g = cv.getContext("2d");
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.drawImage(liveSrcCanvas, 0, 0, cw, ch);
+        if (!read || !read.client) return;
+        g.setTransform(sc, 0, 0, sc, 0, 0); // draw geometry in frame pixels
+        const lw = Math.max(1.5, W / 600) / sc;
+        const c = read.client;
+        g.lineWidth = lw;
+        g.setLineDash([lw * 4, lw * 3]);
+        g.strokeStyle = "rgba(200, 155, 60, 0.85)";
+        g.strokeRect(c.x, c.y, c.w, c.h);
+        g.setLineDash([]);
+        const strokeList = (list) => {
+          for (const p of list || []) {
+            if (!p.spot) continue;
+            const b = gridBoxOf(p);
+            g.strokeStyle = vColor(p.verdict);
+            g.lineWidth = p.verdict === "reject" ? lw : lw * 1.7;
+            g.setLineDash([]);
+            g.strokeRect(b.x0, b.y0, b.size, b.size);
+            const s = snapBoxOf(p);
+            if (s) {
+              g.lineWidth = lw;
+              g.setLineDash([lw * 3, lw * 2]);
+              g.strokeRect(s.x0, s.y0, s.size, s.size);
+              g.setLineDash([]);
+            }
+          }
+        };
+        strokeList(read.benchSlots);
+        strokeList(read.pickCircles);
+      }
+
+      // The live overlay loop (~1.5 fps). Pauses while frozen; no Web Worker here,
+      // so this runs the pipeline on the main thread — fine for a debug tool.
+      function liveTick() {
+        if (!liveStream || liveFrozen) return;
+        const dim = grabLive();
+        if (dim && iconHashById) {
+          try {
+            paintLive(readLive(dim.W, dim.H), dim.W, dim.H);
+          } catch (_) {}
+        }
+        liveTimer = setTimeout(liveTick, 650);
+      }
+
+      function setLiveButtons() {
+        const on = !!liveStream;
+        $("freeze").disabled = !on || liveFrozen;
+        $("step").disabled = !on || !liveFrozen;
+        $("resume").disabled = !on || !liveFrozen;
+        $("export").disabled = !on;
+      }
+
+      async function startLive() {
+        if (!iconHashById)
+          return setStatus("Still building the database — one moment.", true);
+        try {
+          liveStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: 5 },
+          });
+        } catch (_) {
+          return setStatus("Screen share was cancelled.", true);
+        }
+        liveVideo = document.createElement("video");
+        liveVideo.muted = true;
+        liveVideo.playsInline = true;
+        liveVideo.srcObject = liveStream;
+        await liveVideo.play();
+        liveStream.getVideoTracks()[0].addEventListener("ended", stopLive);
+        liveFrozen = false;
+        $("livestage").hidden = false;
+        $("livectrls").hidden = false;
+        $("golive").hidden = true;
+        setLiveButtons();
+        setStatus(
+          "Live — open ARAM champ select, then Freeze to analyze a frame.",
+        );
+        liveTick();
+      }
+
+      function freezeLive() {
+        const dim = grabLive();
+        if (!dim) return;
+        liveFrozen = true;
+        clearTimeout(liveTimer);
+        setLiveButtons();
+        const read = renderFrame(liveSrcCanvas, dim.W, dim.H);
+        paintLive(read, dim.W, dim.H);
+        setStatus(
+          "Frozen — full breakdown below. Step for the next frame, or Resume.",
+        );
+      }
+
+      function stepLive() {
+        if (!liveFrozen) return;
+        const dim = grabLive();
+        if (!dim) return;
+        const read = renderFrame(liveSrcCanvas, dim.W, dim.H);
+        paintLive(read, dim.W, dim.H);
+      }
+
+      function resumeLive() {
+        if (!liveStream) return;
+        liveFrozen = false;
+        clearTimeout(liveTimer);
+        setLiveButtons();
+        setStatus("Live — Freeze to analyze a frame.");
+        liveTick();
+      }
+
+      // Export exactly the frame currently in liveSrcCanvas (the frozen/stepped one
+      // while paused), for building failing-frame fixtures.
+      function exportLive() {
+        if (!liveSrcCanvas.width) return;
+        liveSrcCanvas.toBlob((blob) => {
+          if (!blob) return;
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = `scan-frame-${Date.now()}.png`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }, "image/png");
+      }
+
+      function stopLive() {
+        clearTimeout(liveTimer);
+        liveTimer = null;
+        if (liveStream) liveStream.getTracks().forEach((t) => t.stop());
+        liveStream = null;
+        liveVideo = null;
+        liveFrozen = false;
+        $("livestage").hidden = true;
+        $("livectrls").hidden = true;
+        $("golive").hidden = false;
+        setStatus("Live stopped.");
+      }
+
+      $("golive").addEventListener("click", startLive);
+      $("freeze").addEventListener("click", freezeLive);
+      $("step").addEventListener("click", stepLive);
+      $("resume").addEventListener("click", resumeLive);
+      $("export").addEventListener("click", exportLive);
+      $("stoplive").addEventListener("click", stopLive);
 
       buildHashes().catch((e) =>
         setStatus("Failed to load champion database: " + e.message, true),

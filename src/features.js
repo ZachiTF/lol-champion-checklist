@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 5;
+const FEATURES_VERSION = 6;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -100,6 +100,22 @@ const FEATURE_LIST = [
       {
         title: "“Start over” button",
         desc: "if you can see it read the wrong thing, step it back a stage — once to re-read champion select, again to re-find the League window.",
+      },
+    ],
+  },
+  {
+    icon: "🕹️",
+    title: "Classic mode, one champion per tile",
+    desc: "Classic mode's 2009 champions are the same champions, so they share one tile and one checkmark instead of showing up twice.",
+    since: 6,
+    sub: [
+      {
+        title: "The old art is still there",
+        desc: "hover a tile to flip it to that champion's 2009 icon.",
+      },
+      {
+        title: "Nothing to clean up later",
+        desc: "if Riot retires the old icons the grid just goes back to normal — and any progress you'd marked on a duplicate tile has already moved to the real champion.",
       },
     ],
   },

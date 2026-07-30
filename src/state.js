@@ -57,6 +57,34 @@ function migrateProgressTimestamps(page) {
   return changed;
 }
 
+// Move progress saved under a Classic-mode duplicate id (Jade_Ahri) onto the real
+// champion (Ahri) on every page. When both were marked, keep the earlier date —
+// that's when the champion was actually done. ISO strings compare chronologically.
+/**
+ * @param {Map<string,string>} aliases variant id → champion id
+ * @returns {boolean} whether anything moved (caller persists if so)
+ */
+function migrateVariantProgress(aliases) {
+  if (!aliases || !aliases.size) return false;
+  let changed = false;
+  for (const page of Object.values(state.pages)) {
+    const progress = page && page.progress;
+    if (!progress || typeof progress !== "object") continue;
+    for (const [id, value] of Object.entries(progress)) {
+      const canonical = aliases.get(id);
+      if (!canonical) continue;
+      delete progress[id];
+      changed = true;
+      if (!value) continue; // explicitly-not-done carries nothing over
+      const existing = progress[canonical];
+      if (!existing || (typeof value === "string" && value < existing)) {
+        progress[canonical] = value;
+      }
+    }
+  }
+  return changed;
+}
+
 (function migrateState() {
   let changed = false;
   for (const page of Object.values(state.pages)) {

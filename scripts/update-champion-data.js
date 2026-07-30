@@ -19,6 +19,7 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const { foldClassicChampions } = require("../src/champion-variants.js");
 
 // LCU challenge id -> reference key (keys are the historical names used in
 // reference-challenge-data.json; matched by id because Riot occasionally
@@ -174,12 +175,27 @@ async function main() {
   const championJson = await httpsGetJson(
     `https://ddragon.leagueoflegends.com/cdn/${patch}/data/en_US/champion.json`,
   );
+  // Data Dragon lists the original champions twice while Classic mode is live
+  // (see src/champion-variants.js). The roster here is the folded one — one entry
+  // per champion — so the Classic ids resolve to nothing and are skipped like any
+  // other non-roster id. That's on purpose: Riot's challenge lists quote the
+  // Classic ids in places the modern champion isn't (Jade Skarner sits in the
+  // Bandle City list), so honouring them would rewrite the curated filters now and
+  // rewrite them back whenever the mode goes away. The grid's lists stay put.
+  const { champions: roster, aliases } = foldClassicChampions(
+    championJson.data,
+  );
   const numericToId = {};
   const allChampionIds = new Set();
-  Object.values(championJson.data).forEach((c) => {
+  roster.forEach((c) => {
     numericToId[c.key] = c.id;
     allChampionIds.add(c.id);
   });
+  const classicKeys = new Set(
+    Object.values(championJson.data)
+      .filter((c) => aliases.has(c.id))
+      .map((c) => Number(c.key)),
+  );
   console.log(`Data Dragon ${patch}: ${allChampionIds.size} champions\n`);
 
   // Try the live source first.
@@ -201,14 +217,18 @@ async function main() {
       challenge.availableIds.forEach((num) => {
         const id = numericToId[num];
         if (id) ids.push(id);
-        else skipped.add(num); // special game-mode variants etc.
+        else skipped.add(num); // Classic duplicates, special game-mode variants etc.
       });
       referenceData[refKey] = ids.sort();
     }
     if (skipped.size) {
-      console.log(
-        `  (ignored non-roster champion ids: ${[...skipped].join(", ")})\n`,
-      );
+      const classic = [...skipped].filter((n) => classicKeys.has(n));
+      const other = [...skipped].filter((n) => !classicKeys.has(n));
+      const parts = [];
+      if (classic.length)
+        parts.push(`${classic.length} Classic-mode duplicates`);
+      if (other.length) parts.push(`ids ${other.join(", ")}`);
+      console.log(`  (ignored non-roster champions: ${parts.join("; ")})\n`);
     }
     // Preserve any lists the LCU couldn't provide.
     const old = JSON.parse(fs.readFileSync(REFERENCE_PATH, "utf8"));

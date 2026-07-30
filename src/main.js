@@ -38,10 +38,11 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
     return fetch(CHAMPION_JSON_URL).then((res) => res.json());
   })
   .then((championData) => {
-    // Store champion data
-    champions = Object.values(championData.data).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    // Store champion data. Data Dragon lists the original champions twice since
+    // Classic mode (modern + 2009 art); fold the duplicates onto the one real
+    // champion so the grid, the filters and the progress stay per-champion.
+    const folded = foldClassicChampions(championData.data);
+    champions = folded.champions.sort((a, b) => a.name.localeCompare(b.name));
     resetSortOrder();
 
     // Metadata (CHAMPION_REGIONS and CHAMPION_PROPERTIES) already available from loaded scripts
@@ -52,6 +53,10 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
         page.color = getNextColor();
       }
     }
+
+    // Migration: champions marked on a Classic duplicate card (only possible in
+    // the window before they were folded) belong to the real champion.
+    migrateVariantProgress(folded.aliases);
 
     if (Object.keys(state.pages).length === 0) {
       createPage("Default");

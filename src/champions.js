@@ -264,6 +264,20 @@ function createChampionCard(champ) {
   name.textContent = champ.name;
 
   div.appendChild(img);
+
+  // The original champions have a second, 2009-era icon from Classic mode. It's
+  // the same champion — one card, one progress entry (see foldClassicChampions) —
+  // but hovering the tile flips to the old art, because it's fun to look at.
+  if (champ.classic) {
+    const classicImg = document.createElement("img");
+    classicImg.className = "champion-classic";
+    classicImg.src = `${CHAMPION_ICON_BASE}${champ.classic.image.full}`;
+    classicImg.alt = "";
+    classicImg.loading = "lazy";
+    classicImg.onerror = () => classicImg.remove();
+    div.appendChild(classicImg);
+  }
+
   div.appendChild(name);
 
   // Long-press on touch devices shows the tooltip instead of toggling.
