@@ -1439,6 +1439,7 @@ body.summoner-search-hidden .wip-notice {
 }
 
 .champion {
+  position: relative;
   background: var(--card-bg, #151a23);
   border-radius: 8px;
   padding: 6px;
@@ -1472,6 +1473,31 @@ body.summoner-search-hidden .wip-notice {
   font-size: 12px;
   margin-top: 4px;
   word-break: break-word;
+}
+
+/* Classic-mode (2009) art for the original champions: stacked exactly over the
+   modern icon and revealed on hover/focus. Purely decorative — the card is still
+   one champion with one progress entry. */
+.champion-classic {
+  position: absolute;
+  top: 6px; /* matches .champion padding, so it lands on the modern icon */
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.champion:hover .champion-classic,
+.champion:focus .champion-classic,
+.champion:focus-visible .champion-classic {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .champion-classic {
+    transition: none;
+  }
 }
 
 .champion.done {

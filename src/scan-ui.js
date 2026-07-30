@@ -36,7 +36,15 @@ function loadCrossOriginImage(url) {
 }
 
 // Build (or restore from localStorage) a hash per champion icon. Cached by patch.
-const ICON_HASH_VERSION = 2; // bump when the stored hash shape changes (added hC/sigC)
+// One hash per CHAMPION, from the modern icon: `champions` is the folded list
+// (see foldClassicChampions), so Classic-mode art never enters the candidate set.
+// That's deliberate — champion select shows the modern icons, and hashing the
+// classic art too was measured to only cost accuracy: with those 60 extra
+// candidates in the map, an upscaled capture of the test fixture started reading
+// Elise as Dr. Mundo's classic art. If the old icons ever do turn up in champ
+// select, hash `champ.classic.image.full` as its own entry and map the id back
+// through the folder's aliases before the read is used.
+const ICON_HASH_VERSION = 3; // bump when the stored hash set changes (v3: drops caches built while the Classic duplicates counted as champions)
 
 async function ensureIconHashes(onProgress) {
   if (iconHashes && iconHashes.patch === PATCH) return iconHashes;
