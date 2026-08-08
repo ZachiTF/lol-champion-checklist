@@ -109,15 +109,16 @@ to the committed snapshot. See `data/README.md` for details.
 
 - `index.html` — app shell (loads the `src/` scripts in order)
 - `src/` — app logic, split by concern (classic scripts sharing globals, no build step):
-  - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested). Locates the ARAM client/bench/circles anywhere in the frame and at any scale — a full-desktop print screen works, even with the client windowed over a busy background (browser chrome, other champion grids), by finding the bench through periodicity + champion content rather than fixed positions
-  - `scan-ui.js` — scan overlay, paste/drop, icon hashing, the "Available now" group
+  - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested): the perceptual matcher, the modular `ClientFinder → SlotProvider → IconMatcher` pipeline, the mode registry, and the **adaptive** ARAM reader, which finds the bench anywhere in the frame at any scale via periodicity + champion content
+  - `scan-aram.js` — the **default** reader: the hardcoded ARAM: Mayhem layout. Every icon sits at a known fraction of the champ-select client rectangle, so the only thing to work out is that rectangle (a window/tab share IS it; otherwise a 16:9 window is located from its borders and a bench-comb alignment score polishes it). Faster than the adaptive reader and far harder to point at the wrong thing; it declines rather than guessing when it can't find the client. Fractions were measured with `scripts/measure-layout.js`
+  - `scan-ui.js` — scan overlay, paste/drop, icon hashing, the reader switch, the "Available now" group
   - `features.js` — the Features & guide overlay (opened via ❔ in the settings drawer; keep `FEATURE_LIST` current when shipping features)
   - `state.js` · `champions.js` · `render.js` · `history.js` · `riot-api.js` · `main.js`
 - `style.css` — styling
 - `scan-debug.html` — interactive debugger for the screenshot-scan pipeline
 - `test/` — `node:test` regression tests + fixtures (run with `npm test`)
 - `data/` — generated filter files
-- `scripts/` — data generation scripts
+- `scripts/` — data generation scripts, plus `measure-layout.js` (dev-only: brute-forces the true pixel position of known champions in a screenshot, which is how `scan-aram.js`'s layout fractions were calibrated)
 - `vendor/` — vendored third-party libraries (canvas-confetti; the jsdelivr
   auto-minified build serves varying bytes per edge node, breaking SRI)
 

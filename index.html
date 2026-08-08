@@ -158,8 +158,11 @@
          bytes per edge node, which made SRI hashes fail intermittently. -->
     <script src="vendor/canvas-confetti-1.9.3.js"></script>
     <script src="celebrations.js"></script>
-    <!-- Pure scan pipeline math; no app dependencies, so it can load standalone. -->
+    <!-- Pure scan pipeline math; no app dependencies, so it can load standalone.
+         scan-aram.js registers the default (hardcoded ARAM: Mayhem) mode and
+         must come after the core it builds on. -->
     <script src="src/scan-core.js"></script>
+    <script src="src/scan-aram.js"></script>
     <script>
       window.APP_CONFIG = window.APP_CONFIG || {};
       // Load the optional local config first, then the app modules in order.

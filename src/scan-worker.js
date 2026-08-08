@@ -11,13 +11,22 @@
 //     worker from a path throws SecurityError ("origin 'null'"). A Blob worker's
 //     base URL is the blob, so a relative import would not resolve there.
 // Import only if the core isn't in scope yet, so both paths work unchanged.
-if (typeof findBenchBar === "undefined") importScripts("scan-core.js");
+// scan-aram.js registers the default mode and depends on the core, so it is
+// pulled in right after it (and only on the path that does the importing).
+if (typeof findBenchBar === "undefined")
+  importScripts("scan-core.js", "scan-aram.js");
 
 // Champion hash map, rebuilt once from the serialized items the page sends, plus
-// the ARAM pipeline that composes the pure stages (ClientFinder → SlotProvider →
-// IconMatcher) from scan-core.js.
+// one pipeline per scan mode, built on demand. A mode composes the pure stages
+// (ClientFinder → SlotProvider → IconMatcher); "aram" is the hardcoded ARAM:
+// Mayhem template and "aram-adaptive" the searching fallback.
 let byId = null;
-let pipeline = null;
+const pipelines = new Map();
+function pipelineFor(mode) {
+  const id = mode || SCAN_DEFAULT_MODE;
+  if (!pipelines.has(id)) pipelines.set(id, pipelineForMode(id));
+  return pipelines.get(id);
+}
 
 self.onmessage = (e) => {
   const m = e.data;
@@ -34,7 +43,7 @@ self.onmessage = (e) => {
         },
       ]),
     );
-    pipeline = pipelineForMode("aram");
+    pipelines.clear();
     self.postMessage({ type: "ready" });
     return;
   }
@@ -46,12 +55,15 @@ self.onmessage = (e) => {
     }
     const frame = { buf: new Uint8ClampedArray(m.buf), W: m.w, H: m.h };
     // A cached client (from a prior read) short-circuits the locate stage.
+    // `frameIsClient` says the shared surface IS champion select (a window or
+    // tab share), which lets the fixed template skip hunting for the window.
     const ctx = {
       iconHashById: byId,
       tight: !!m.tight,
       client: m.client || null,
+      frameIsClient: !!m.frameIsClient,
     };
-    const r = runFrameRead(pipeline, frame, ctx);
+    const r = runFrameRead(pipelineFor(m.mode), frame, ctx);
     if (!r.client) {
       self.postMessage({ type: "result", id: m.id, client: null });
       return;

@@ -229,11 +229,17 @@
     <h1>Champion Scan — Pipeline Debugger</h1>
     <p class="sub">
       Drop or paste an ARAM champion-select screenshot — a cropped client
-      <em>or a full-desktop print screen</em> — to watch each step of
-      <a href="src/scan-core.js">src/scan-core.js</a>: locate the client/bench/
-      circles anywhere at any scale → 10-slot grid → per-slot local search →
-      dHash + color-signature match → verify the layout holds together as
-      champion select → verdict. Or <strong>Go live</strong> to share your
+      <em>or a full-desktop print screen</em> — to watch each step of the
+      pipeline: locate the client → 10-slot grid → per-slot local search → dHash
+      + color-signature match → verify the layout holds together as champion
+      select → verdict. The <strong>Reader</strong> picks which locate stage
+      runs: <em>ARAM layout</em> (<a href="src/scan-aram.js">src/scan-aram.js</a
+      >, the app default) fits the known ARAM: Mayhem template to the frame and
+      reads exact positions;
+      <em>Search for the bench</em>
+      (<a href="src/scan-core.js">src/scan-core.js</a>) hunts for the bench by
+      champion content at any scale, and is the one that also draws the bench
+      band and circle-search overlays. Or <strong>Go live</strong> to share your
       screen and watch the overlay track champ select in real time — then
       Freeze/Step to pull the full breakdown (with per-stage timing) for any
       frame.
@@ -245,6 +251,13 @@
     </div>
 
     <div id="live" class="live">
+      <label for="reader"
+        >Reader
+        <select id="reader">
+          <option value="aram">ARAM layout (hardcoded, default)</option>
+          <option value="aram-adaptive">Search for the bench (adaptive)</option>
+        </select>
+      </label>
       <button id="golive" type="button">📹 Go live</button>
       <span id="livectrls" hidden>
         <button id="freeze" type="button">⏸ Freeze &amp; analyze</button>
@@ -263,8 +276,14 @@
     <!-- Pure pipeline math, shared with the app. In the browser its top-level
          functions become globals we can call directly. -->
     <script src="src/scan-core.js"></script>
+    <script src="src/scan-aram.js"></script>
     <script>
       const LANG = "en_US";
+      // Which reader the breakdown runs. "aram" is the app default (the
+      // hardcoded ARAM: Mayhem template in src/scan-aram.js); "aram-adaptive"
+      // is the original bench search, which also hands back the bench/circle
+      // geometry the extra locate overlays below draw.
+      let debugMode = "aram";
       const statusEl = document.getElementById("status");
       const out = document.getElementById("out");
       const setStatus = (m, err) => {
@@ -616,6 +635,10 @@
         out.appendChild(stage);
       }
 
+      // The last rasterized frame, so switching reader re-analyses the same
+      // picture instead of asking for it again.
+      let lastFrameCanvas = null;
+
       // Rasterize a dropped/pasted Image, then hand off to renderFrame.
       function render(img) {
         const W = img.naturalWidth,
@@ -631,6 +654,7 @@
       // or a live-capture snapshot. Returns the pipeline read so a live caller can
       // reuse it for the preview overlay without re-running the pipeline.
       function renderFrame(canvas, W, H) {
+        lastFrameCanvas = { canvas, W, H };
         out.innerHTML = "";
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         const buf = ctx.getImageData(0, 0, W, H).data;
@@ -645,9 +669,13 @@
         // the breakdown below. Every box, verdict, and id drawn here is the app's
         // own output — no logic is re-implemented in this page.
         const frame = { buf, W, H };
-        const read = runFrameRead(pipelineForMode("aram"), frame, {
+        const read = runFrameRead(pipelineForMode(debugMode), frame, {
           iconHashById,
           debug: true,
+          // The fixed reader assumes exact positions and matches tight; ask for
+          // the wide per-slot search here so the debugger shows the same
+          // candidate spread both readers would consider.
+          wideSearch: true,
         });
         if (!read.client) {
           const t = read.timings;
@@ -659,15 +687,18 @@
           return read;
         }
         const client = read.client;
-        const { bench, circleRegion } = client.hints;
+        // Only the adaptive reader carries its search geometry forward as
+        // hints; the fixed template derives everything from the client rect, so
+        // the bench-band and circle-region overlays simply don't apply there.
+        const { bench, circleRegion } = client.hints || {};
         const tm = read.timings || { locateMs: 0, matchMs: 0, totalMs: 0 };
 
         const stage0 = document.createElement("div");
         stage0.className = "stage";
-        stage0.innerHTML = `<h2>0 · Locate (client ${Math.round(
+        stage0.innerHTML = `<h2>0 · Locate — ${debugMode} (client ${Math.round(
           client.w,
-        )}×${Math.round(client.h)}, pitch ${
-          bench.pitch
+        )}×${Math.round(client.h)}${bench ? `, pitch ${bench.pitch}` : ""}${
+          client.score != null ? `, fit ${client.score.toFixed(0)}` : ""
         }) · locate ${tm.locateMs.toFixed(0)}ms · match ${tm.matchMs.toFixed(
           0,
         )}ms · total ${tm.totalMs.toFixed(0)}ms</h2>`;
@@ -681,32 +712,36 @@
         lctx.setLineDash([10, 6]);
         lctx.strokeStyle = "#c89b3c";
         lctx.strokeRect(client.x, client.y, client.w, client.h);
-        // bench band + horizontal extent (solid gold)
+        // bench band + horizontal extent (solid gold) — adaptive reader only
         lctx.setLineDash([]);
-        lctx.strokeStyle = "#ffd54f";
-        lctx.strokeRect(
-          bench.xLeft,
-          bench.yt,
-          bench.xRight - bench.xLeft,
-          bench.yb - bench.yt,
-        );
-        lctx.fillStyle = "rgba(255, 213, 79, 0.12)";
-        lctx.fillRect(
-          bench.xLeft,
-          bench.yt,
-          bench.xRight - bench.xLeft,
-          bench.yb - bench.yt,
-        );
-        // team-circle search region (dashed cyan)
-        lctx.setLineDash([8, 5]);
-        lctx.strokeStyle = "#4dd0e1";
-        lctx.strokeRect(
-          circleRegion.xa,
-          circleRegion.y0,
-          circleRegion.xb - circleRegion.xa,
-          circleRegion.y1 - circleRegion.y0,
-        );
-        lctx.setLineDash([]);
+        if (bench) {
+          lctx.strokeStyle = "#ffd54f";
+          lctx.strokeRect(
+            bench.xLeft,
+            bench.yt,
+            bench.xRight - bench.xLeft,
+            bench.yb - bench.yt,
+          );
+          lctx.fillStyle = "rgba(255, 213, 79, 0.12)";
+          lctx.fillRect(
+            bench.xLeft,
+            bench.yt,
+            bench.xRight - bench.xLeft,
+            bench.yb - bench.yt,
+          );
+        }
+        // team-circle search region (dashed cyan) — adaptive reader only
+        if (circleRegion) {
+          lctx.setLineDash([8, 5]);
+          lctx.strokeStyle = "#4dd0e1";
+          lctx.strokeRect(
+            circleRegion.xa,
+            circleRegion.y0,
+            circleRegion.xb - circleRegion.xa,
+            circleRegion.y1 - circleRegion.y0,
+          );
+          lctx.setLineDash([]);
+        }
         const wrap0 = document.createElement("div");
         wrap0.className = "overlay-wrap";
         wrap0.appendChild(loc);
@@ -714,11 +749,16 @@
         stage0.insertAdjacentHTML(
           "beforeend",
           `<div class="legend">
-             <span><i class="dot" style="background:#c89b3c"></i>reconstructed client</span>
-             <span><i class="dot" style="background:#ffd54f"></i>bench bar (pitch ${
-               bench.pitch
-             }, center ${Math.round(bench.center)})</span>
-             <span><i class="dot" style="background:#4dd0e1"></i>team-circle search</span>
+             <span><i class="dot" style="background:#c89b3c"></i>${
+               bench ? "reconstructed client" : "client rect (template fit)"
+             }</span>${
+               bench
+                 ? `<span><i class="dot" style="background:#ffd54f"></i>bench bar (pitch ${
+                     bench.pitch
+                   }, center ${Math.round(bench.center)})</span>
+             <span><i class="dot" style="background:#4dd0e1"></i>team-circle search</span>`
+                 : ""
+             }
            </div>`,
         );
         out.appendChild(stage0);
@@ -726,9 +766,9 @@
         // Stage 1: annotated overlay
         const stage1 = document.createElement("div");
         stage1.className = "stage";
-        stage1.innerHTML = `<h2>1 · Detection (bandH ${bench.bandH.toFixed(
-          0,
-        )}, ${bench.slots.length} slots)</h2>`;
+        stage1.innerHTML = `<h2>1 · Detection (${
+          bench ? `bandH ${bench.bandH.toFixed(0)}, ` : ""
+        }${read.benchSlots.length} slots)</h2>`;
         const benchSlots = read.benchSlots; // [{ spot, m, verdict }], bench order
         const circles = read.pickCircles; // [{ spot, m, verdict }], top-to-bottom
         const overlay = document.createElement("canvas");
@@ -915,6 +955,16 @@
         }
       }
 
+      document.getElementById("reader").addEventListener("change", (e) => {
+        debugMode = e.target.value;
+        if (lastFrameCanvas)
+          renderFrame(
+            lastFrameCanvas.canvas,
+            lastFrameCanvas.W,
+            lastFrameCanvas.H,
+          );
+      });
+
       const drop = document.getElementById("drop");
       document
         .getElementById("file")
@@ -966,7 +1016,7 @@
           .getContext("2d", { willReadFrequently: true })
           .getImageData(0, 0, W, H).data;
         return runFrameRead(
-          pipelineForMode("aram"),
+          pipelineForMode(debugMode),
           { buf, W, H },
           { iconHashById, debug: true },
         );
