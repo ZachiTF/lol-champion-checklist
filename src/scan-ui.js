@@ -21,6 +21,37 @@ let scanState = {
   active: false,
 };
 
+// ---- which reader is in charge --------------------------------------------
+// "aram" is the default: the hardcoded ARAM: Mayhem layout (src/scan-aram.js).
+// It assumes the screen is ARAM champion select, works out where the client
+// rectangle is, and then reads 15 exact positions. That is the right bet — it
+// is what the tool is used for essentially every time — and it is both faster
+// and far harder to fool than searching for the bench.
+//
+// "aram-adaptive" is the original pipeline, which hunts for the bench by
+// champion content at any scale and position. Slower and easier to mislead, but
+// it copes with captures the template cannot pin down — a screenshot cropped so
+// tightly that the client's own edges aren't in frame, most of all. The UI
+// keeps it one click away while a scan is running.
+const SCAN_READERS = [
+  {
+    id: "aram",
+    label: "ARAM layout",
+    hint: "Assumes ARAM: Mayhem champion select and reads the known icon positions.",
+  },
+  {
+    id: "aram-adaptive",
+    label: "Search for the bench",
+    hint: "Slower fallback: finds the champion bench anywhere in the picture. Try this if the ARAM layout can't find champion select — for example on a tightly cropped screenshot.",
+  },
+];
+let scanReader = "aram";
+function scanReaderInfo(id) {
+  return (
+    SCAN_READERS.find((r) => r.id === (id || scanReader)) || SCAN_READERS[0]
+  );
+}
+
 // Champion icon hashes, keyed by champ id: { h: BigInt (64-bit dHash), sig: [27] }.
 let iconHashes = null;
 const ICON_HASH_STORE = "lol_icon_hashes"; // localStorage cache, keyed by patch
@@ -222,11 +253,7 @@ async function ensureScanDb() {
   );
   return !!(iconHashes && iconHashes.byId.size);
 }
-// Locate the champ-select layout in a frame (assumes the DB is ready).
-function locateForScan(buf, w, h) {
-  return locateLayout(buf, w, h, iconHashes.byId);
-}
-// (readBench / readPicks / combineReads are pure and live in scan-core.js so the
+// (The pipeline stages are pure and live in scan-core.js / scan-aram.js so the
 // Web Worker can share them; the main thread passes iconHashes.byId explicitly.)
 
 // For the one-shot (single-frame) path there's no cross-frame consensus, so an
@@ -235,12 +262,12 @@ function locateForScan(buf, w, h) {
 // scores: Map(id -> { self, alts:Map(altId->color) }) } — the same shape the live
 // consensus produces, so renderScanResults can show match-distance confidence
 // numbers either way. `color` is the icon-match distance (lower = closer).
-function altsAndScoresFromReads(reads, uncertain) {
+function altsAndScoresFromPositions(positionLists, uncertain) {
   const alternatives = new Map();
   const scores = new Map();
   if (!uncertain || !uncertain.size) return { alternatives, scores };
-  for (const r of reads) {
-    for (const pos of r.slots || r.circles || []) {
+  for (const list of positionLists) {
+    for (const pos of list || []) {
       const m = pos.m;
       if (!m || !uncertain.has(m.id) || alternatives.has(m.id)) continue;
       const altObjs = (m.alts || []).filter((a) => a.id !== m.id).slice(0, 3);
@@ -274,9 +301,11 @@ const scanReqPending = new Map(); // id -> resolve
 function scanWorkerUrls() {
   const tag = document.querySelector('script[src*="scan-core.js"]');
   const core = tag ? tag.src : new URL("src/scan-core.js", location.href).href;
+  const sibling = (name) => core.replace(/scan-core\.js(\?.*)?$/, name);
   return {
     core,
-    worker: core.replace(/scan-core\.js(\?.*)?$/, "scan-worker.js"),
+    aram: sibling("scan-aram.js"),
+    worker: sibling("scan-worker.js"),
   };
 }
 
@@ -295,9 +324,9 @@ function ensureScanWorker() {
     // A Blob worker has no such restriction and can pull in the same two files
     // by absolute URL, so the pipeline stays off-thread on file:// too.
     try {
-      const boot = `importScripts(${JSON.stringify(
-        urls.core,
-      )}, ${JSON.stringify(urls.worker)});`;
+      const boot = `importScripts(${[urls.core, urls.aram, urls.worker]
+        .map((u) => JSON.stringify(u))
+        .join(", ")});`;
       scanWorkerBlobUrl = URL.createObjectURL(
         new Blob([boot], { type: "text/javascript" }),
       );
@@ -351,7 +380,7 @@ function teardownScanWorker(disable) {
 // Transferring detaches it, which is fine because grabLiveFrame hands us a fresh
 // buffer each poll and nothing reads it afterwards.
 const SCAN_WORKER_TIMEOUT_MS = 30000; // only a hung-worker backstop, not a deadline
-function scanViaWorker(buf, w, h, cachedClient, tight) {
+function scanViaWorker(buf, w, h, opts) {
   return new Promise((resolve) => {
     const id = scanReqId++;
     let done = false;
@@ -372,35 +401,36 @@ function scanViaWorker(buf, w, h, cachedClient, tight) {
         finish(null);
       }
     }, SCAN_WORKER_TIMEOUT_MS);
-    scanWorker.postMessage(
-      {
-        type: "scan",
-        id,
-        buf,
-        w,
-        h,
-        client: cachedClient || null,
-        tight: !!tight,
-      },
-      [buf.buffer],
-    );
+    scanWorker.postMessage({ type: "scan", id, buf, w, h, ...opts }, [
+      buf.buffer,
+    ]);
   });
 }
 
-// Lazily-built main-thread ARAM pipeline — the fallback when a Web Worker isn't
-// available (file://, blocked). Same stages the worker composes.
-let scanMainPipeline = null;
-function getScanPipeline() {
-  if (!scanMainPipeline) scanMainPipeline = pipelineForMode("aram");
-  return scanMainPipeline;
+// Lazily-built main-thread pipelines, one per reader — the fallback when a Web
+// Worker isn't available (file://, blocked). Same stages the worker composes.
+const scanMainPipelines = new Map();
+function getScanPipeline(mode) {
+  const id = mode || scanReader;
+  if (!scanMainPipelines.has(id))
+    scanMainPipelines.set(id, pipelineForMode(id));
+  return scanMainPipelines.get(id);
 }
 
 // Locate + read a frame through the modular pipeline, off-thread when possible.
-// `cachedClient` short-circuits the locate stage on a pixel-stable live frame.
+// `opts.client` short-circuits the locate stage on a pixel-stable live frame;
+// `opts.frameIsClient` tells the fixed template the capture IS champion select.
 // Returns { layout(=client), ids, uncertain, picks, benchCount, filledSlots,
 // benchSlots, pickCircles } or { layout:null }. (The field is named `layout` for
 // back-compat with the live loop; it now carries the located ClientRect.)
-async function scanFrameAsync(buf, w, h, cachedClient, tight) {
+async function scanFrameAsync(buf, w, h, opts) {
+  const o = {
+    mode: scanReader,
+    client: null,
+    tight: false,
+    frameIsClient: false,
+    ...(opts || {}),
+  };
   const worker = ensureScanWorker();
   if (worker) {
     if (!scanWorkerReady && scanWorkerReadyPromise) {
@@ -414,7 +444,7 @@ async function scanFrameAsync(buf, w, h, cachedClient, tight) {
       if (!scanWorkerReady) teardownScanWorker(true);
     }
     if (scanWorkerReady) {
-      const m = await scanViaWorker(buf, w, h, cachedClient, tight);
+      const m = await scanViaWorker(buf, w, h, o);
       // A null answer means the worker died/was recycled. Skip this frame rather
       // than running the same heavy locate on the main thread — that freeze is
       // what made the Start over / Stop sharing buttons unclickable.
@@ -438,10 +468,11 @@ async function scanFrameAsync(buf, w, h, cachedClient, tight) {
   const frame = { buf, W: w, H: h };
   const ctx = {
     iconHashById: iconHashes.byId,
-    tight: !!tight,
-    client: cachedClient || null,
+    tight: o.tight,
+    client: o.client,
+    frameIsClient: o.frameIsClient,
   };
-  const r = runFrameRead(getScanPipeline(), frame, ctx);
+  const r = runFrameRead(getScanPipeline(o.mode), frame, ctx);
   if (!r.client) return { layout: null };
   return {
     layout: r.client,
@@ -473,17 +504,23 @@ async function runScanFromImage(img) {
   return runScanFromBuffer(buf, w, h);
 }
 
+// The last still image scanned, so switching reader can re-run without asking
+// for the screenshot again. Cleared when a live capture takes over.
+let lastScanImage = null;
+
 // Run the pipeline on a raw RGBA buffer (a pasted image or a live capture frame)
 // and pin the results. Reports progress through the stepped indicator + status
 // line. Returns the number of champions found. The panel always stays open, so a
 // live capture can read again as the bench fills over ~10s and gets swapped.
 async function runScanFromBuffer(buf, w, h) {
   ensureScanPanel();
+  // Keep a copy: scanFrameAsync TRANSFERS the buffer to the worker, which
+  // detaches it, and the reader switch needs to read the same picture again.
+  lastScanImage = { buf: new Uint8ClampedArray(buf), w, h };
   scanBeginSteps();
   await nextPaint(); // paint the "all pending" checklist first
 
-  // Finding champion select matches against champion icons, so the hash database
-  // must be ready first.
+  // Matching runs against champion icons, so the hash database must be ready.
   scanStep(STEP_DB, "active");
   scanSetStatus("Preparing champion database…");
   await nextPaint();
@@ -494,47 +531,35 @@ async function runScanFromBuffer(buf, w, h) {
   }
   scanStep(STEP_DB, "done");
 
-  // Find the champ-select layout anywhere in the frame (works on a full-desktop
-  // print screen, at any scale) — bench bar + the reconstructed team-circle region.
+  // One pass of the selected reader: locate champion select, then read the
+  // bench and your team's picks. Same code path the live loop uses, so the two
+  // can never drift apart.
   scanStep(STEP_FIND, "active");
-  scanSetStatus("Finding champion select…");
+  scanSetStatus(`Finding champion select (${scanReaderInfo().label})…`);
   await nextPaint();
-  const layout = locateForScan(buf, w, h);
-  if (!layout) {
+  const res = await scanFrameAsync(buf, w, h, {});
+  if (!res.layout) {
     scanStep(STEP_FIND, "error");
-    scanSetStatus(
-      "Couldn't find champion select. Make sure the top “Available Champions” bar is fully visible.",
-      true,
-    );
+    scanSetStatus(scanNotFoundMessage(), true);
+    renderReaderSwitch();
     return 0;
   }
-  scanStep(STEP_FIND, "done");
-
-  // Read the available-champion pool (bench squares).
-  scanStep(STEP_BENCH, "active");
-  scanSetStatus("Reading available champions…");
-  await nextPaint();
-  const bench = readBench(buf, w, h, layout, iconHashes.byId);
+  // One pipeline call covers both reads, so they land together.
   scanStep(STEP_BENCH, "done");
 
-  // Read your team's locked picks (the circles).
-  scanStep(STEP_PICKS, "active");
-  scanSetStatus("Reading your team's picks…");
-  await nextPaint();
-  const picks = readPicks(buf, w, h, layout, iconHashes.byId);
-
-  const { ids, uncertain } = combineReads(bench, picks);
+  const { ids, uncertain } = res;
   if (!ids.length) {
     scanStep(STEP_PICKS, "error");
     scanSetStatus(
       "No champions recognized. Make sure champion select is on screen and the top row is visible.",
       true,
     );
+    renderReaderSwitch();
     return 0;
   }
   scanStep(STEP_PICKS, "done");
-  const { alternatives, scores } = altsAndScoresFromReads(
-    [bench, picks],
+  const { alternatives, scores } = altsAndScoresFromPositions(
+    [res.benchSlots, res.pickCircles],
     uncertain,
   );
   scanState = {
@@ -549,17 +574,40 @@ async function runScanFromBuffer(buf, w, h) {
   const n = ids.length;
   // Same layout check the live loop uses. There's no state to step back to on a
   // single pasted image, so just say the read looks off — the champions are still
-  // pinned, flagged, and the user can re-crop or paste a cleaner screenshot.
-  const v = verifyLayout(bench.slots, picks.circles);
+  // pinned, flagged, and the user can switch reader or paste a cleaner shot.
+  const v = res.verify;
   scanSetStatus(
     `Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓` +
-      (v.ok ? "" : ` (heads up: ${v.reason} — double-check these)`),
-    !v.ok,
+      (!v || v.ok ? "" : ` (heads up: ${v.reason} — double-check these)`),
+    !!(v && !v.ok),
   );
+  renderReaderSwitch();
   scanHost()
     ?.querySelector(".scan-pinned")
     ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   return n;
+}
+
+// What to say when the current reader couldn't find champion select — including
+// the nudge towards the other one, since that is the actual fix most of the time.
+function scanNotFoundMessage() {
+  const other = SCAN_READERS.find((r) => r.id !== scanReader);
+  return (
+    `Couldn't find champion select with the ${
+      scanReaderInfo().label
+    } reader. ` +
+    (scanReader === "aram"
+      ? "Make sure the whole League window is in the picture"
+      : "Make sure the top “Available Champions” bar is fully visible") +
+    (other ? ` — or try “${other.label}”.` : ".")
+  );
+}
+
+// Re-run the last still image with whichever reader is selected now.
+async function rescanLastImage() {
+  if (!lastScanImage) return;
+  const { buf, w, h } = lastScanImage;
+  await runScanFromBuffer(new Uint8ClampedArray(buf), w, h);
 }
 
 // ---- the pinned "Available now" group (its own child of #scan-results) ----
@@ -964,6 +1012,7 @@ async function startLiveCapture() {
   video.srcObject = liveStream;
   await video.play().catch(() => {});
   liveVideo = video;
+  lastScanImage = null; // live frames take over from any pasted screenshot
   // If the user stops sharing via the browser's own control, tear down cleanly.
   track?.addEventListener("ended", () => {
     stopLiveCapture();
@@ -1098,6 +1147,7 @@ async function runLiveAuto() {
   ensureScanWorker(); // warm the worker (seed hashes) before the first poll
   liveHistory = [];
   liveEnter("watching");
+  renderReaderSwitch();
   scanSetStatus(
     "Watching for champion select… open your ARAM lobby and it’ll read automatically.",
   );
@@ -1122,13 +1172,13 @@ async function liveLoop() {
     // full locate when we don't. Runs in the Web Worker when available, so the UI
     // stays smooth during the first read and the watching-phase locates.
     const cached = !!liveLayout;
-    const res = await scanFrameAsync(
-      frame.buf,
-      frame.w,
-      frame.h,
-      liveLayout,
-      cached,
-    );
+    const res = await scanFrameAsync(frame.buf, frame.w, frame.h, {
+      client: liveLayout,
+      tight: cached,
+      // Sharing a single window means the captured surface IS champion select,
+      // so the fixed template can skip looking for the client's own borders.
+      frameIsClient: liveSurface === "window",
+    });
     // Sharing may have been stopped, or the user may have pressed Start over,
     // while the read was in flight. Either way this result is stale — drop it
     // without touching the state or scheduling a follow-up poll.
@@ -1361,11 +1411,13 @@ function ensureScanPanel() {
     `<div class="scan-live"></div>` +
     `<div class="scan-sources"></div>` +
     `<ol class="scan-steps" hidden></ol>` +
-    `<div class="scan-status" role="status"></div>`;
+    `<div class="scan-status" role="status"></div>` +
+    `<div class="scan-reader"></div>`;
   // Insert before the pinned results so the panel is always on top.
   host.insertBefore(panel, host.querySelector(".scan-pinned"));
 
   panel.querySelector(".scan-panel-close").onclick = closeScanPanel;
+  renderReaderSwitch();
 
   const input = document.createElement("input");
   input.type = "file";
@@ -1387,6 +1439,59 @@ function ensureScanPanel() {
 
   renderLiveControls(false);
   return panel;
+}
+
+// ---- the reader switch ("this isn't working, try the other tool") ----------
+// Always visible in the panel, including mid-scan: if you can SEE the overlay
+// boxes landing in the wrong place, the fix is one click away rather than a
+// re-paste. Switching restarts whatever is currently running — a live capture
+// goes back to hunting for champion select with the new reader, a pasted
+// screenshot is simply read again.
+function renderReaderSwitch() {
+  const wrap = scanPanelEl()?.querySelector(".scan-reader");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const label = document.createElement("span");
+  label.className = "scan-reader-label";
+  label.textContent = "Reading as:";
+  wrap.appendChild(label);
+  for (const reader of SCAN_READERS) {
+    const b = document.createElement("button");
+    b.className = "scan-reader-option";
+    b.classList.toggle("active", reader.id === scanReader);
+    b.textContent = reader.label;
+    b.title = reader.hint;
+    b.setAttribute("aria-pressed", String(reader.id === scanReader));
+    b.onclick = () => setScanReader(reader.id);
+    wrap.appendChild(b);
+  }
+  const hint = document.createElement("span");
+  hint.className = "scan-reader-hint";
+  hint.textContent = scanReaderInfo().hint;
+  wrap.appendChild(hint);
+}
+
+function setScanReader(id) {
+  if (id === scanReader || !SCAN_READERS.some((r) => r.id === id)) return;
+  scanReader = id;
+  renderReaderSwitch();
+  if (liveVideo) {
+    // Restart the live state machine at "watching": the cached client rect and
+    // the frame consensus both belong to the old reader. liveRelocate bumps the
+    // epoch, so a read already in flight lands as stale and is dropped.
+    if (liveTimer) {
+      clearTimeout(liveTimer);
+      liveTimer = null;
+    }
+    liveChecking = false;
+    liveRelocate("reader changed");
+    scanSetStatus(
+      `Watching for champion select with the ${scanReaderInfo().label} reader…`,
+    );
+    scheduleNextCheck(liveLoop, 150);
+  } else if (lastScanImage) {
+    rescanLastImage();
+  }
 }
 
 function openScanPanel() {

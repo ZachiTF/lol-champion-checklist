@@ -1525,8 +1525,16 @@ function createPipeline({ findClient, provideSlots, matchIcons }) {
 
 // Ready-made modes. Swap `provideSlots` to change game mode, `findClient` to
 // change how the client is located (e.g. wholeFrameClient for a shared window).
+//
+// The DEFAULT mode id is "aram", and src/scan-aram.js registers it: the
+// hardcoded ARAM: Mayhem template, which places all 15 icons from the client
+// rect alone. "aram-adaptive" below is the original searching pipeline — it
+// hunts for the bench by champion content at any scale and phase. That is more
+// general but slower and easier to fool, so it is now the manual fallback the
+// UI offers rather than the default. Load order matters only in that
+// pipelineForMode() falls back to the adaptive mode when scan-aram.js is absent.
 const SCAN_MODES = {
-  aram: {
+  "aram-adaptive": {
     findClient: benchAnchoredClient,
     provideSlots: aramSlots,
     matchIcons: perceptualMatcher,
@@ -1542,8 +1550,19 @@ const SCAN_MODES = {
     matchIcons: perceptualMatcher,
   },
 };
+const SCAN_DEFAULT_MODE = "aram";
+const SCAN_FALLBACK_MODE = "aram-adaptive";
+// Modes register themselves so a mode can live in its own module (scan-aram.js)
+// without scan-core.js having to know about it.
+function registerScanMode(id, mode) {
+  SCAN_MODES[id] = mode;
+  return mode;
+}
 function pipelineForMode(modeId, overrides) {
-  const mode = SCAN_MODES[modeId] || SCAN_MODES.aram;
+  const mode =
+    SCAN_MODES[modeId] ||
+    SCAN_MODES[SCAN_DEFAULT_MODE] ||
+    SCAN_MODES[SCAN_FALLBACK_MODE];
   return createPipeline({ ...mode, ...(overrides || {}) });
 }
 
@@ -1650,6 +1669,9 @@ if (typeof module !== "undefined" && module.exports) {
     toSpotMatch,
     createPipeline,
     SCAN_MODES,
+    SCAN_DEFAULT_MODE,
+    SCAN_FALLBACK_MODE,
+    registerScanMode,
     pipelineForMode,
     runFrameRead,
     AGG_WINDOW,

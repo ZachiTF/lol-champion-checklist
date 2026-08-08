@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 6;
+const FEATURES_VERSION = 7;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -116,6 +116,22 @@ const FEATURE_LIST = [
       {
         title: "Nothing to clean up later",
         desc: "if Riot retires the old icons the grid just goes back to normal — and any progress you'd marked on a duplicate tile has already moved to the real champion.",
+      },
+    ],
+  },
+  {
+    icon: "📐",
+    title: "Reads ARAM by its actual layout",
+    desc: "Scanning now assumes ARAM: Mayhem champion select — where every icon sits is known in advance — so it works out where the League window is and reads the exact spots. Faster, and much harder to point at the wrong thing.",
+    since: 7,
+    sub: [
+      {
+        title: "Switch readers mid-scan",
+        desc: "if it can't find champion select — a tightly cropped screenshot, say — “Search for the bench” hunts for the champion row anywhere in the picture instead. One click, no re-paste.",
+      },
+      {
+        title: "Says when it isn't sure",
+        desc: "rather than pinning a confident-looking wrong guess, it tells you it couldn't find champion select and points you at the other reader.",
       },
     ],
   },

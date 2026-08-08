@@ -216,8 +216,12 @@ test("aramSlots emits 10 bench spots + the 5 detected team circles", () => {
   assert.equal(spots.filter((s) => s.kind === "circle").length, 5);
 });
 
-test("ARAM pipeline reproduces the direct bench + circle reads exactly", () => {
-  const r = core.runFrameRead(core.pipelineForMode("aram"), frame, ctx);
+test("adaptive ARAM pipeline reproduces the direct bench + circle reads exactly", () => {
+  const r = core.runFrameRead(
+    core.pipelineForMode("aram-adaptive"),
+    frame,
+    ctx,
+  );
   assert.ok(r.client, "pipeline locates the client");
   assert.deepEqual(r.ids.slice(0, r.benchCount), EXPECTED);
   assert.deepEqual(r.ids.slice(r.benchCount), EXPECTED_CIRCLES);
@@ -229,7 +233,7 @@ test("ARAM pipeline reproduces the direct bench + circle reads exactly", () => {
 test("swapping the ClientFinder (whole-frame) keeps the ARAM matcher working", () => {
   // The fixture is a native-resolution client capture, so wholeFrameClient +
   // calibrated slot placement should recover the same roster without a search.
-  const pipeline = core.pipelineForMode("aram", {
+  const pipeline = core.pipelineForMode("aram-adaptive", {
     findClient: core.wholeFrameClient,
   });
   const r = core.runFrameRead(pipeline, frame, ctx);
@@ -329,14 +333,18 @@ test("benchAnchoredClient returns null on a frame with no champ select", () => {
   assert.equal(core.benchAnchoredClient(blank, ctx), null);
 });
 
-test("ARAM pipeline yields an empty read (no throw) on a blank frame", () => {
-  const r = core.runFrameRead(core.pipelineForMode("aram"), blank, ctx);
+test("adaptive ARAM pipeline yields an empty read (no throw) on a blank frame", () => {
+  const r = core.runFrameRead(
+    core.pipelineForMode("aram-adaptive"),
+    blank,
+    ctx,
+  );
   assert.equal(r.client, null);
   assert.deepEqual(Object.keys(r).sort(), ["client", "timings"]);
 });
 
 test("pipeline.run short-circuits cleanly when no client is found", () => {
-  const out = core.pipelineForMode("aram").run(blank, ctx);
+  const out = core.pipelineForMode("aram-adaptive").run(blank, ctx);
   assert.equal(out.client, null);
   assert.deepEqual(out.spots, []);
   assert.deepEqual(out.matches, []);
@@ -900,14 +908,22 @@ test("classifySlotOccupancy separates champion / empty / unexplained", () => {
 });
 
 test("runFrameRead reports verification alongside the read", () => {
-  const r = core.runFrameRead(core.pipelineForMode("aram"), { buf, W, H }, ctx);
+  const r = core.runFrameRead(
+    core.pipelineForMode("aram-adaptive"),
+    { buf, W, H },
+    ctx,
+  );
   assert.ok(r.verify, "runFrameRead should carry a verify result");
   assert.ok(r.verify.ok, `real frame should verify — ${r.verify.reason}`);
   assert.equal(r.verify.circles, 5);
 });
 
 test("runFrameRead reports per-stage timings (locate vs. match)", () => {
-  const r = core.runFrameRead(core.pipelineForMode("aram"), { buf, W, H }, ctx);
+  const r = core.runFrameRead(
+    core.pipelineForMode("aram-adaptive"),
+    { buf, W, H },
+    ctx,
+  );
   assert.ok(r.timings, "runFrameRead should carry timings");
   for (const k of ["locateMs", "matchMs", "totalMs"]) {
     assert.equal(typeof r.timings[k], "number", `${k} should be a number`);
@@ -915,7 +931,7 @@ test("runFrameRead reports per-stage timings (locate vs. match)", () => {
   }
   // A cached client short-circuits the finder, so locate should cost ~nothing.
   const cached = core.runFrameRead(
-    core.pipelineForMode("aram"),
+    core.pipelineForMode("aram-adaptive"),
     { buf, W, H },
     { ...ctx, client: r.client },
   );
