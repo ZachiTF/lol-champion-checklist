@@ -11,3 +11,7 @@ test/fixtures/
 node_modules/
 package-lock.json
 *.png
+
+# Raw recorded sessions (gitignored data)
+screen_recordings/
+test_data/

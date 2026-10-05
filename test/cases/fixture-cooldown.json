@@ -1,0 +1,18 @@
+{
+  "image": "../fixtures/aram-cooldown.png",
+  "surface": "window",
+  "note": "swap-cooldown shadow on bench slot 4; identity there is at the noise floor, so only occupancy is asserted",
+  "bench": [
+    "Zeri",
+    "Anivia",
+    "Gwen",
+    "Yunara",
+    "?",
+    "Taliyah",
+    "Karma",
+    "Akshan",
+    "JarvanIV",
+    null
+  ],
+  "allies": ["Nautilus", "Sion", "Thresh", "Varus", "Seraphine"]
+}

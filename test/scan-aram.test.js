@@ -9,8 +9,11 @@
 //   aram-bench.png    a window-share capture — the frame IS the client
 //   aram-desktop.png  a windowed client on a busy desktop, 0.6x scale
 //   aram-bench-2.png  a screenshot cropped INTO the client (its own borders are
-//                     off-frame) — the case the template cannot pin down, kept
-//                     here to pin the honest "I don't know" instead
+//                     off-frame, and the client is WIDER than the capture) — the
+//                     case that needs the scale ladder to be reachable at all
+//   negative-champion-grid.png  this app's own champion grid filling a screen,
+//                     with no League client: the adversarial negative that pins
+//                     the honest "I don't know"
 //
 // Run: npm test
 
@@ -45,6 +48,7 @@ function loadFrame(name) {
 const windowShare = loadFrame("aram-bench.png"); // 1274x706, frame == client
 const desktop = loadFrame("aram-desktop.png"); // 1152x648, client is a window
 const cropped = loadFrame("aram-bench-2.png"); // 1063x696, cropped into client
+const appGrid = loadFrame("negative-champion-grid.png"); // 1920x1080, no client
 
 // Ground truth, from the app's own expectations for these fixtures.
 const SHARE_BENCH = [
@@ -73,6 +77,14 @@ const DESKTOP_CIRCLES = [
   "Pantheon",
   "MissFortune",
   "Ashe",
+];
+const CROPPED_BENCH = ["RekSai", "Corki", "Kled", "Jayce", "Sejuani", "Renata"];
+const CROPPED_CIRCLES = [
+  "Malzahar",
+  "AurelionSol",
+  "Fiddlesticks",
+  "MissFortune",
+  "Mel",
 ];
 
 function read(frame, ctx) {
@@ -110,9 +122,10 @@ test("places 10 bench squares and 5 ally circles from the client rect alone", ()
     bench.every((s) => s.cy === bench[0].cy),
     "the bench is one row",
   );
-  assert.equal(Math.round(circles[0].cx), 85);
-  assert.equal(Math.round(circles[0].cy), 135);
-  assert.equal(Math.round(circles[4].cy - circles[0].cy), 319); // 4 x 79.75
+  // Allies re-fitted to the gold ring on a native 1280x720 recording.
+  assert.equal(circles[0].cx, 85.5);
+  assert.equal(Math.round(circles[0].cy * 10) / 10, 134.3);
+  assert.equal(Math.round(circles[4].cy - circles[0].cy), 320); // 4 x 80.0
 });
 
 test("the template scales and translates with the client rect", () => {
@@ -197,21 +210,28 @@ test("desktop capture: locates the windowed client and reads the roster", () => 
   assert.deepEqual(kept(r.pickCircles), DESKTOP_CIRCLES);
 });
 
-test("says it cannot find champion select rather than guessing", () => {
-  // aram-bench-2.png is cropped INTO the client, so neither the frame nor any
-  // rectangle in it is the client. The adaptive reader handles this one; the
-  // template must decline instead of returning a confident wrong rectangle.
-  const r = read(cropped, {});
-  assert.equal(r.client, null);
-  // ...and the fallback the UI offers does read it.
-  const alt = core.runFrameRead(
-    core.pipelineForMode("aram-adaptive"),
-    cropped,
-    {
-      iconHashById,
-    },
+test("reaches a client that is WIDER than the frame showing it", () => {
+  // aram-bench-2.png is cropped INTO the client: its borders are off-frame and
+  // the real client is 1274px wide inside a 1063px capture. Coordinate descent
+  // only reaches +/-4% in scale, so this used to be unreachable and the reader
+  // declined. ARAM_SCALE_LADDER re-seeds the scale, which brings it in range.
+  const r = read(cropped, { frameIsClient: true });
+  assert.ok(r.client, "the scale ladder should reach the client");
+  assert.ok(
+    Math.abs(r.client.w - 1280) <= 40,
+    `client w ${r.client.w} should be about 1280`,
   );
-  assert.ok(alt.client, "the adaptive reader should still cope");
+  assert.deepEqual(kept(r.benchSlots), CROPPED_BENCH);
+  assert.deepEqual(kept(r.pickCircles), CROPPED_CIRCLES);
+});
+
+test("says it cannot find champion select rather than guessing", () => {
+  // The adversarial negative: this app's own champion grid filling a screen. A
+  // regular lattice of champion icons is the likeliest thing to be mistaken for
+  // a bench, and the edge score alone IS fooled by it — acceptance rests on
+  // champion evidence (aramBenchEvidence), which is what refuses here.
+  const r = read(appGrid, {});
+  assert.equal(r.client, null);
 });
 
 test("blank frame: no client, no throw", () => {
@@ -240,4 +260,43 @@ test("a cached client rect skips the locate stage entirely", () => {
   });
   assert.deepEqual(kept(cached.benchSlots), kept(first.benchSlots));
   assert.ok(cached.timings.locateMs <= first.timings.locateMs);
+});
+
+// The labelling "Snap to rings" must be a fixed point that pulls a rough
+// placement back onto it — otherwise labelled geometry depends on where the
+// human happened to click.
+test("snapAramClient converges to the same rect from rough placements", () => {
+  const aram = require("../src/scan-aram.js");
+  const { loadFrame } = require("../scripts/case-set.js");
+  const f = loadFrame(
+    require("node:path").join(__dirname, "fixtures", "aram-bench.png"),
+  );
+  const ref = aram.snapAramClient(f, {
+    x: 0,
+    y: 0,
+    w: f.W,
+    h: (f.W * 720) / 1280,
+  });
+  const spots = aram.aramTemplateSpots(ref);
+  for (const [dx, dy, k] of [
+    [10, 5, 1],
+    [-8, -8, 0.99],
+    [6, -10, 1.01],
+  ]) {
+    const c = aram.snapAramClient(f, {
+      x: ref.x + dx,
+      y: ref.y + dy,
+      w: ref.w * k,
+      h: ref.h * k,
+    });
+    const err = Math.max(
+      ...aram
+        .aramTemplateSpots(c)
+        .map((s, i) => Math.hypot(s.cx - spots[i].cx, s.cy - spots[i].cy)),
+    );
+    assert.ok(
+      err < 1,
+      `from ${dx},${dy} x${k}: boxes off by ${err.toFixed(2)}px`,
+    );
+  }
 });

@@ -1,0 +1,18 @@
+{
+  "image": "../fixtures/aram-desktop.png",
+  "surface": "monitor",
+  "note": "1152x648 full desktop, client windowed over browser chrome and the app's own champion grid",
+  "bench": [
+    "Graves",
+    "Nilah",
+    "Braum",
+    "Talon",
+    "Blitzcrank",
+    "Thresh",
+    "Nautilus",
+    "Elise",
+    null,
+    null
+  ],
+  "allies": ["Nidalee", "Tristana", "Pantheon", "MissFortune", "Ashe"]
+}

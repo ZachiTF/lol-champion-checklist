@@ -208,6 +208,16 @@
       .live button:hover:not(:disabled) {
         border-color: var(--gold);
       }
+      .live button.rec-on {
+        border-color: var(--reject);
+        color: var(--reject);
+      }
+      .slot.disagree select {
+        outline: 2px solid var(--maybe);
+      }
+      .slot select {
+        max-width: 100%;
+      }
       .live button:disabled {
         opacity: 0.4;
         cursor: default;
@@ -258,16 +268,40 @@
           <option value="aram-adaptive">Search for the bench (adaptive)</option>
         </select>
       </label>
+      <label for="surface"
+        >Surface
+        <select id="surface">
+          <option value="auto">Auto (from the share)</option>
+          <option value="window">
+            Client window / tab (frame IS the client)
+          </option>
+          <option value="monitor">Whole monitor (hunt for the window)</option>
+        </select>
+      </label>
       <button id="golive" type="button">📹 Go live</button>
       <span id="livectrls" hidden>
         <button id="freeze" type="button">⏸ Freeze &amp; analyze</button>
         <button id="step" type="button" disabled>⏭ Step</button>
         <button id="resume" type="button" disabled>▶ Resume</button>
         <button id="export" type="button" disabled>⬇ Export frame</button>
+        <button id="record" type="button">⏺ Record samples</button>
+        <span id="recstat" class="cap"></span>
         <button id="stoplive" type="button">✕ Stop</button>
       </span>
     </div>
     <div id="livestage" hidden><canvas id="livecanvas"></canvas></div>
+
+    <!-- Recorded samples: frames kept while playing, labelled afterwards. -->
+    <div id="samples" class="live"></div>
+    <div id="reviewbar" class="live" hidden>
+      <button id="revprev" type="button">◀ Prev</button>
+      <span id="revpos"></span>
+      <b id="revsaved"></b>
+      <button id="revok" type="button">✓ Labels correct → next</button>
+      <button id="revnext" type="button">Skip ▶</button>
+      <button id="revdrop" type="button">🗑 Discard frame</button>
+      <button id="revdone" type="button">✕ Close review</button>
+    </div>
 
     <div id="status">Loading champion database…</div>
 
@@ -277,6 +311,7 @@
          functions become globals we can call directly. -->
     <script src="src/scan-core.js"></script>
     <script src="src/scan-aram.js"></script>
+    <script src="src/zip-store.js"></script>
     <script>
       const LANG = "en_US";
       // Which reader the breakdown runs. "aram" is the app default (the
@@ -284,6 +319,7 @@
       // is the original bench search, which also hands back the bench/circle
       // geometry the extra locate overlays below draw.
       let debugMode = "aram";
+      const $ = (id) => document.getElementById(id);
       const statusEl = document.getElementById("status");
       const out = document.getElementById("out");
       const setStatus = (m, err) => {
@@ -552,9 +588,12 @@
         const { grids, diags } = detectGrids({ buf, W, H }, { debug: true });
         const d = diags[0] || {};
         const g0 = grids[0];
-        const stage = document.createElement("div");
+        // Collapsed and last: this detector is NOT part of the reader (nothing
+        // consumes it yet) and its boxes routinely land on unrelated UI, which
+        // reads as "the scanner's boxes are wrong" when it isn't the scanner.
+        const stage = document.createElement("details");
         stage.className = "stage";
-        stage.innerHTML = `<h2>G · Generic grid structure (identity-free)${
+        stage.innerHTML = `<summary>Experimental: generic grid detector — NOT used by the reader</summary><h2>G · Generic grid structure (identity-free)${
           g0
             ? ` — ${g0.cols}×${g0.rows}, pitch ${g0.pitchX}/${g0.pitchY}, size ${g0.size}`
             : " — none found"
@@ -638,6 +677,21 @@
       // The last rasterized frame, so switching reader re-analyses the same
       // picture instead of asking for it again.
       let lastFrameCanvas = null;
+      // What kind of surface the frame came from. The app derives this from
+      // getDisplayMedia's displaySurface and it changes the locate stage
+      // materially (a window share skips the window hunt entirely), so the
+      // debugger has to model it or it is not debugging the same pipeline.
+      let liveSurface = null;
+      // The recorded sample under review, or null when analysing a drop/live
+      // frame: { session, samples, i, sample, carry }. See the recorder below.
+      let review = null;
+      function frameIsClient() {
+        if (review) return review.sample.surface === "window";
+        const pick = $("surface").value;
+        if (pick === "auto")
+          return liveSurface === "window" || liveSurface === "browser";
+        return pick === "window";
+      }
 
       // Rasterize a dropped/pasted Image, then hand off to renderFrame.
       function render(img) {
@@ -650,6 +704,610 @@
         return renderFrame(canvas, W, H);
       }
 
+      // ---- labelling: a failing frame becomes a regression case ---------------
+      // Everything upstream measures; this is what makes a measurement stick. The
+      // panel pre-fills each slot with the reader's own guess, so labelling a
+      // frame is fifteen confirmations rather than fifteen lookups — and the
+      // wrong ones are exactly the interesting ones. Export writes the PNG and a
+      // sidecar JSON; drop both into test/cases/ and `npm test` regresses them
+      // forever (see scripts/case-set.js for the format).
+      let champIdsSorted = null;
+      function champOptions(selected) {
+        if (!champIdsSorted)
+          champIdsSorted = [...iconHashById.keys()].sort((a, b) =>
+            a.localeCompare(b),
+          );
+        const opt = (v, label, sel) =>
+          `<option value="${v}"${
+            v === sel ? " selected" : ""
+          }>${label}</option>`;
+        return (
+          opt("", "(empty slot)", selected) +
+          opt("?", "(filled — identity not asserted)", selected) +
+          champIdsSorted.map((id) => opt(id, id, selected)).join("")
+        );
+      }
+
+      // The surface the frame under analysis came from, as a case records it.
+      function surfaceNow() {
+        return review ? review.sample.surface : liveSurfaceKind();
+      }
+      function liveSurfaceKind() {
+        if ($("surface").value !== "auto") return $("surface").value;
+        return liveSurface === "window" || liveSurface === "browser"
+          ? "window"
+          : "monitor";
+      }
+
+      // Labelling is GEOMETRY first, names second. When the boxes sit on the
+      // icons the matcher names champions well; when they don't, no name is
+      // right. So the ground truth a label records is the client rect the 15
+      // template boxes hang off (fix it with two clicks, nudge it), and the
+      // names are re-read at whatever rect you settle on.
+      const LABEL_VIEW_MAX_W = 1100;
+      const rectOf = (c) => ({
+        x: Math.round(c.x * 10) / 10,
+        y: Math.round(c.y * 10) / 10,
+        w: Math.round(c.w * 10) / 10,
+        h: Math.round(c.h * 10) / 10,
+      });
+      // The client rect that puts bench slot 0's centre at p and the last ally
+      // portrait's centre at q — the two template points farthest apart.
+      function clientFromTwoPoints(p, q) {
+        const T = ARAM_TEMPLATE;
+        const a = { x: T.bench.slot0Cx, y: T.bench.cy };
+        const b = {
+          x: T.allies.cx,
+          y: T.allies.cy0 + (T.allies.count - 1) * T.allies.pitch,
+        };
+        const w = (p.x - q.x) / (a.x - b.x);
+        const h = (p.y - q.y) / (a.y - b.y);
+        if (!(w > 50 && h > 30)) return null;
+        return rectOf({ x: p.x - a.x * w, y: p.y - a.y * h, w, h });
+      }
+
+      // The 15 boxes as they sit ON SCREEN, in frame pixels: {kind, cx, cy,
+      // size}, where size is the bench square's side or the gold ring's
+      // diameter — what is visibly there, not any reader's crop. Labels store
+      // these, not just the client rect: a rect only means "wherever the
+      // current template puts the boxes", which silently changes meaning when
+      // the template is re-measured and can't express a box it gets wrong.
+      const RING_TO_CROP =
+        ARAM_TEMPLATE.allies.size / (2 * ARAM_TEMPLATE.allies.ring);
+      function templateBoxes(c) {
+        const ringD = 2 * ARAM_TEMPLATE.allies.ring * c.w;
+        return aramTemplateSpots(c).map((s) => ({
+          kind: s.kind,
+          cx: s.cx,
+          cy: s.cy,
+          size: s.kind === "circle" ? ringD : s.size,
+        }));
+      }
+      const zeroAdj = () =>
+        Array.from({ length: 15 }, () => ({ dx: 0, dy: 0 }));
+      // A saved label's boxes as per-box offsets from its rect's template boxes
+      // under the CURRENT template — so the boxes stay where they were saved.
+      function adjFrom(L) {
+        if (!L || !L.client || !L.boxes) return zeroAdj();
+        const t = templateBoxes(L.client);
+        return L.boxes.map((b, i) => ({
+          dx: b.cx - t[i].cx,
+          dy: b.cy - t[i].cy,
+        }));
+      }
+      const r1 = (v) => Math.round(v * 10) / 10;
+
+      let labelKeys = null; // the keyboard handler of the label stage on screen
+      function labelStage(canvas, read) {
+        const W = canvas.width,
+          H = canvas.height;
+        const buf = canvas
+          .getContext("2d", { willReadFrequently: true })
+          .getImageData(0, 0, W, H).data;
+        let adj = zeroAdj(); // per-box offsets on top of the rect's template
+        let selBox = null; // index of the box being moved on its own, or null
+        const boxesNow = () =>
+          templateBoxes(geom).map((b, i) => ({
+            ...b,
+            cx: b.cx + adj[i].dx,
+            cy: b.cy + adj[i].dy,
+          }));
+        // Names are always read at the boxes on screen — moved ones included.
+        const readAt = (c) => {
+          if (!c) return { client: null, benchSlots: [], pickCircles: [] };
+          const ctx = { iconHashById, client: c, debug: true };
+          if (!adj.some((a) => a.dx || a.dy))
+            return runFrameRead(pipelineForMode("aram"), { buf, W, H }, ctx);
+          const spots = boxesNow().map((b, i) => ({
+            kind: b.kind,
+            index: i < 10 ? i : i - 10,
+            cx: b.cx,
+            cy: b.cy,
+            size: Math.round(
+              b.kind === "circle" ? b.size * RING_TO_CROP : b.size,
+            ),
+          }));
+          return runFrameRead(
+            pipelineForMode("aram", { provideSlots: () => spots }),
+            { buf, W, H },
+            ctx,
+          );
+        };
+
+        const saved = review && review.sample.labels;
+        // Whose boxes to start from: this frame's saved label (the human's
+        // answer); else the boxes you settled on for an earlier frame of this
+        // session — the client window rarely moves mid champ select, and the
+        // reader's own rect is the thing being tested; else the reader's.
+        const readerGeom = read.client ? rectOf(read.client) : null;
+        const carried = review && !saved ? reviewCarriedLabel() : null;
+        const geomFrom =
+          saved && "client" in saved
+            ? "saved"
+            : carried
+            ? "carried"
+            : readerGeom
+            ? "reader"
+            : "none";
+        let geom =
+          geomFrom === "saved"
+            ? saved.client
+            : geomFrom === "carried"
+            ? carried.client
+            : readerGeom;
+        if (geomFrom === "saved") adj = adjFrom(saved);
+        if (geomFrom === "carried") adj = adjFrom(carried);
+        let cur =
+          geom && (geomFrom === "saved" || geomFrom === "carried")
+            ? readAt(geom)
+            : read;
+        let placing = null; // null, or the clicks so far while placing boxes
+        // Where the names come from: "carry" = your saved labels for this
+        // frame, else the last labelled frame's (first view); "reader" = the
+        // reader at the boxes you just set; "empty" = No champ select.
+        let source = "carry";
+        let names = null; // the names on screen, by slot ("" = empty)
+
+        const stage = document.createElement("div");
+        stage.className = "stage";
+        stage.innerHTML =
+          "<h2>Label this frame — boxes first, then names</h2>" +
+          "<p class='cap'>Are the 15 boxes on the icons? If not, " +
+          "<b>📐 Place boxes</b> (two clicks), <b>S</b> to snap, arrows to nudge. " +
+          "One box off on its own? <b>Click its zoom</b> to select it — arrows " +
+          "then move only that box, S ring-snaps that circle, Esc deselects. " +
+          "Names are re-read at your boxes. Not champ select? <b>No champ " +
+          "select</b>. Then check the names (amber = the reader disagrees with " +
+          "your last frame's labels).</p>";
+        const tools = document.createElement("div");
+        tools.className = "live";
+        tools.innerHTML =
+          `<button type="button" data-g="place">📐 Place boxes</button>` +
+          `<button type="button" data-g="snap" title="fit the boxes to the gold rings around the ally portraits">🧲 Snap to rings</button>` +
+          `<span class="cap" title="½ px per click, Shift = 5 px; arrow keys and + / − work too">nudge</span>` +
+          `<button type="button" data-g="left">◀</button>` +
+          `<button type="button" data-g="right">▶</button>` +
+          `<button type="button" data-g="up">▲</button>` +
+          `<button type="button" data-g="down">▼</button>` +
+          `<button type="button" data-g="shrink">− size</button>` +
+          `<button type="button" data-g="grow">+ size</button>` +
+          `<button type="button" data-g="reader">↺ Reader's boxes</button>` +
+          `<button type="button" data-g="none">∅ No champ select</button>` +
+          `<span class="cap" data-hint></span>`;
+        const hint = tools.querySelector("[data-hint]");
+        const view = document.createElement("canvas");
+        const sc = Math.min(1, LABEL_VIEW_MAX_W / W);
+        view.width = Math.round(W * sc);
+        view.height = Math.round(H * sc);
+        view.style.cursor = "crosshair";
+        const grid = document.createElement("div");
+        grid.className = "slots";
+        stage.append(tools, view, grid);
+
+        function draw() {
+          const g = view.getContext("2d");
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.drawImage(canvas, 0, 0, view.width, view.height);
+          g.setTransform(sc, 0, 0, sc, 0, 0);
+          const lw = 1.5 / sc;
+          if (geom) {
+            g.lineWidth = lw;
+            g.setLineDash([lw * 4, lw * 3]);
+            g.strokeStyle = "rgba(200,155,60,0.9)";
+            g.strokeRect(geom.x, geom.y, geom.w, geom.h);
+            g.setLineDash([]);
+            const verdicts = cur.client
+              ? [...cur.benchSlots, ...cur.pickCircles].map((p) => p.verdict)
+              : [];
+            boxesNow().forEach((s, i) => {
+              g.strokeStyle =
+                i === selBox ? "#e879f9" : vColor(verdicts[i] || "maybe");
+              g.lineWidth = lw * (i === selBox ? 2.5 : 1.5);
+              g.beginPath();
+              // Circles are drawn ON the gold ring, which is what the eye
+              // aligns against; the matcher's crop sits inside it.
+              if (s.kind === "circle")
+                g.arc(s.cx, s.cy, s.size / 2, 0, Math.PI * 2);
+              else g.rect(s.cx - s.size / 2, s.cy - s.size / 2, s.size, s.size);
+              g.stroke();
+              g.fillStyle = "#fff";
+              g.font = `${12 / sc}px system-ui`;
+              g.fillText(
+                i < 10 ? "b" + i : "a" + (i - 10),
+                s.cx - s.size / 2,
+                s.cy - s.size / 2 - 3 / sc,
+              );
+            });
+          }
+          for (const p of placing || []) {
+            g.fillStyle = "#e879f9";
+            g.beginPath();
+            g.arc(p.x, p.y, 4 / sc, 0, Math.PI * 2);
+            g.fill();
+          }
+        }
+
+        const picks = [];
+        function fillNames() {
+          grid.innerHTML = "";
+          picks.length = 0;
+          const spots = cur.client
+            ? [...cur.benchSlots, ...cur.pickCircles]
+            : Array.from({ length: 15 }, () => null);
+          const guesses = spots.map((p) =>
+            !p || p.verdict === "reject" || !p.m ? "" : p.m.id,
+          );
+          // Names are yours once they're on screen: moving boxes re-reads the
+          // reader's guesses (shown in amber) but never overwrites a name. Only
+          // a blank list is filled in, and "No champ select" clears it.
+          if (source === "empty") names = guesses.map(() => "");
+          else if (names === null || names.every((n) => n === ""))
+            names = guesses.map((g, i) =>
+              source === "carry" && review ? reviewPrefill(i, g) : g,
+            );
+          spots.forEach((p, i) => {
+            const label = i < 10 ? "bench " + i : "ally " + (i - 10);
+            const guess = guesses[i];
+            const prefill = names[i];
+            const row = document.createElement("div");
+            row.className =
+              "slot " +
+              (p ? p.verdict : "reject") +
+              (prefill !== guess ? " disagree" : "");
+            row.innerHTML =
+              `<div class="verdict">${label}${
+                prefill !== guess ? ` · reader: ${guess || "empty"}` : ""
+              }</div>` + `<select>${champOptions(prefill)}</select>`;
+            if (geom) row.insertBefore(slotZoom(i), row.lastChild);
+            if (i === selBox) row.style.outline = "2px solid #e879f9";
+            const sel = row.querySelector("select");
+            picks.push(() => sel.value);
+            // Every edit is stored at once: navigating away must never be
+            // what decides whether your work survives.
+            sel.addEventListener("change", () => {
+              names[i] = sel.value;
+              autosave();
+            });
+            grid.appendChild(row);
+          });
+        }
+
+        // A magnified crop of one slot with its box drawn on it: the only way
+        // to judge a box to the pixel. Circles show the ring (outer) and the
+        // matcher's crop (inner, dashed) around the centre cross.
+        const ZOOM = 3;
+        function slotZoom(i) {
+          const s = boxesNow()[i];
+          const ringR = s.size / 2;
+          const half = Math.ceil((s.size / 2) * 1.25);
+          const zc = document.createElement("canvas");
+          zc.title = "click to move this box on its own";
+          zc.style.cursor = "pointer";
+          zc.addEventListener("click", () => {
+            selBox = selBox === i ? null : i;
+            hint.textContent =
+              selBox === null
+                ? "all boxes move together"
+                : `box ${
+                    i < 10 ? "b" + i : "a" + (i - 10)
+                  } selected — arrows move it, ` +
+                  (s.kind === "circle" ? "S snaps it to its ring, " : "") +
+                  "Esc deselects";
+            draw();
+            fillNames();
+          });
+          zc.width = zc.height = half * 2 * ZOOM;
+          zc.style.display = "block";
+          zc.style.margin = "6px 0";
+          const g = zc.getContext("2d");
+          g.imageSmoothingEnabled = false;
+          g.drawImage(
+            canvas,
+            s.cx - half,
+            s.cy - half,
+            half * 2,
+            half * 2,
+            0,
+            0,
+            zc.width,
+            zc.height,
+          );
+          const m = half * ZOOM;
+          g.strokeStyle = "#00ff66";
+          g.lineWidth = 1;
+          g.beginPath();
+          if (s.kind === "circle") g.arc(m, m, ringR * ZOOM, 0, Math.PI * 2);
+          else
+            g.rect(
+              m - (s.size / 2) * ZOOM,
+              m - (s.size / 2) * ZOOM,
+              s.size * ZOOM,
+              s.size * ZOOM,
+            );
+          g.stroke();
+          if (s.kind === "circle") {
+            g.setLineDash([4, 4]);
+            g.beginPath();
+            g.arc(m, m, (s.size / 2) * RING_TO_CROP * ZOOM, 0, Math.PI * 2);
+            g.stroke();
+            g.setLineDash([]);
+          }
+          g.strokeStyle = "#e879f9";
+          g.beginPath();
+          g.moveTo(m - 6, m);
+          g.lineTo(m + 6, m);
+          g.moveTo(m, m - 6);
+          g.lineTo(m, m + 6);
+          g.stroke();
+          return zc;
+        }
+
+        function setGeom(c, why, keepAdj) {
+          geom = c;
+          source = why || "reader";
+          if (!keepAdj) {
+            adj = zeroAdj();
+            selBox = null;
+          }
+          cur = readAt(geom);
+          hint.textContent = geom
+            ? geom === readerGeom ||
+              JSON.stringify(geom) === JSON.stringify(readerGeom)
+              ? "reader's boxes"
+              : `your boxes: ${geom.x},${geom.y} ${geom.w}×${geom.h}` +
+                readerOff()
+            : "no champ select — every slot empty";
+          draw();
+          fillNames();
+          autosave();
+        }
+
+        view.addEventListener("click", (e) => {
+          if (!placing) return;
+          const r = view.getBoundingClientRect();
+          placing.push({
+            x: ((e.clientX - r.left) * W) / r.width,
+            y: ((e.clientY - r.top) * H) / r.height,
+          });
+          if (placing.length === 1) {
+            hint.textContent =
+              "now click the centre of the LAST ally portrait (5th circle down the left)";
+            draw();
+            return;
+          }
+          const c = clientFromTwoPoints(placing[0], placing[1]);
+          placing = null;
+          if (!c) {
+            hint.textContent =
+              "those two points don't make a client — try again";
+            return draw();
+          }
+          setGeom(c);
+        });
+
+        tools.addEventListener("click", (e) => {
+          const a = e.target.dataset && e.target.dataset.g;
+          if (!a) return;
+          if (a === "place") {
+            placing = [];
+            hint.textContent =
+              "click the centre of the FIRST bench slot (top row, leftmost square)";
+            return draw();
+          }
+          if (a === "reader") return setGeom(readerGeom);
+          if (a === "none") return setGeom(null, "empty");
+          nudge(a, e.shiftKey);
+        });
+
+        function nudge(a, big) {
+          if (!geom) return;
+          if (selBox !== null) return nudgeBox(a, big);
+          if (a === "snap") {
+            const c = rectOf(snapAramClient({ buf, W, H }, geom));
+            setGeom(c);
+            hint.textContent = "snapped to the rings — " + hint.textContent;
+            return;
+          }
+          // Half a reference pixel per step (5 with Shift): the boxes must be
+          // placeable to the pixel, not to the nearest click.
+          const step = ((big ? 5 : 0.5) * geom.w) / 1280;
+          const k = {
+            shrink: big ? 0.98 : 0.9975,
+            grow: big ? 1.02 : 1.0025,
+          }[a];
+          const g = { ...geom };
+          if (a === "left") g.x -= step;
+          if (a === "right") g.x += step;
+          if (a === "up") g.y -= step;
+          if (a === "down") g.y += step;
+          if (k) {
+            // Scale about the centre so the boxes don't run away.
+            g.x += (g.w * (1 - k)) / 2;
+            g.y += (g.h * (1 - k)) / 2;
+            g.w *= k;
+            g.h *= k;
+          }
+          setGeom(rectOf(g), "reader", true);
+        }
+
+        // Move ONE box, leaving the rest where they are.
+        function nudgeBox(a, big) {
+          const b = boxesNow()[selBox];
+          const step = big ? 5 : 0.5;
+          const o = { ...adj[selBox] };
+          if (a === "snap") {
+            if (b.kind !== "circle") {
+              hint.textContent =
+                "snap works on the circles; nudge a square by hand";
+              return;
+            }
+            const c = fitRingCenter({ buf, W, H }, b.cx, b.cy, b.size / 2);
+            o.dx += c.cx - b.cx;
+            o.dy += c.cy - b.cy;
+          }
+          if (a === "left") o.dx -= step;
+          if (a === "right") o.dx += step;
+          if (a === "up") o.dy -= step;
+          if (a === "down") o.dy += step;
+          adj = adj.map((x, i) => (i === selBox ? o : x));
+          source = "reader";
+          cur = readAt(geom);
+          hint.textContent =
+            `box ${selBox < 10 ? "b" + selBox : "a" + (selBox - 10)} moved ` +
+            `${r1(o.dx)},${r1(o.dy)} px from the rest` +
+            readerOff();
+          draw();
+          fillNames();
+          autosave();
+        }
+
+        // Arrow keys nudge, + / − resize, S snaps — while this frame is shown
+        // and the focus isn't in a name picker.
+        if (labelKeys) document.removeEventListener("keydown", labelKeys);
+        labelKeys = (e) => {
+          if (!stage.isConnected) return;
+          if (/^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+          const a = {
+            ArrowLeft: "left",
+            ArrowRight: "right",
+            ArrowUp: "up",
+            ArrowDown: "down",
+            "+": "grow",
+            "=": "grow",
+            "-": "shrink",
+            s: "snap",
+            Escape: "deselect",
+          }[e.key];
+          if (!a) return;
+          if (a === "deselect") {
+            e.preventDefault();
+            selBox = null;
+            hint.textContent = "all boxes move together";
+            draw();
+            return fillNames();
+          }
+          e.preventDefault();
+          nudge(a, e.shiftKey);
+        };
+        document.addEventListener("keydown", labelKeys);
+
+        // How far the reader's own boxes are from the ones shown, in pixels at
+        // the worst spot — the number this whole labelling exercise is for.
+        const readerOff = () => {
+          if (!geom || !readerGeom) return "";
+          const a = boxesNow(),
+            b = templateBoxes(readerGeom);
+          const px = Math.max(
+            ...a.map((s, i) => Math.hypot(s.cx - b[i].cx, s.cy - b[i].cy)),
+          );
+          return px < 0.5
+            ? " (the reader agrees)"
+            : ` (the reader's boxes are ${px.toFixed(1)}px off these)`;
+        };
+        hint.textContent =
+          {
+            saved: "your saved boxes",
+            carried:
+              "boxes carried from your last labelled frame — check the zoom, S to snap",
+            reader: "reader's boxes",
+            none: "the reader found no champ select — place boxes if it is one",
+          }[geomFrom] + (geomFrom === "reader" ? "" : readerOff());
+        draw();
+        fillNames();
+
+        function labels() {
+          const vals = picks.map((f) => (f() === "" ? null : f()));
+          return {
+            client: geom,
+            boxes: geom
+              ? boxesNow().map((b) => ({
+                  kind: b.kind,
+                  cx: r1(b.cx),
+                  cy: r1(b.cy),
+                  size: r1(b.size),
+                }))
+              : null,
+            bench: vals.slice(0, 10),
+            allies: vals.slice(10, 15),
+          };
+        }
+        function autosave() {
+          if (review) persistLabels(labels());
+        }
+        // The review bar's "✓ Labels correct" confirms whatever is on screen.
+        if (review) {
+          review.currentLabels = labels;
+          $("revok").disabled = false;
+        }
+
+        const bar = document.createElement("div");
+        bar.className = "live";
+        if (review) {
+          bar.innerHTML =
+            `<button type="button" id="savelabels">✓ Save labels &amp; next</button>` +
+            `<label>Surface <b>${surfaceNow()}</b></label>`;
+          bar
+            .querySelector("#savelabels")
+            .addEventListener("click", confirmReviewed);
+        } else {
+          bar.innerHTML =
+            `<label>Case name <input id="casename" value="case-${Date.now()}" size="24"></label>` +
+            `<label>Surface <b>${surfaceNow()}</b></label>` +
+            `<button type="button" id="exportcase">⬇ Export case (PNG + JSON)</button>`;
+          bar.querySelector("#exportcase").addEventListener("click", () => {
+            const name = ($("casename").value || "case").replace(
+              /[^\w.-]+/g,
+              "-",
+            );
+            const L = labels();
+            const json = {
+              image: `./${name}.png`,
+              surface: surfaceNow(),
+              note: "",
+              ...(L.client ? {} : { expect: "decline" }),
+              ...L,
+            };
+            download(
+              new Blob([JSON.stringify(json, null, 2) + "\n"], {
+                type: "application/json",
+              }),
+              name + ".json",
+            );
+            canvas.toBlob((b) => b && download(b, name + ".png"), "image/png");
+          });
+        }
+        stage.appendChild(bar);
+        return stage;
+      }
+
+      function download(blob, filename) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
+
       // Full pipeline breakdown for one already-rasterized frame — a dropped image
       // or a live-capture snapshot. Returns the pipeline read so a live caller can
       // reuse it for the preview overlay without re-running the pipeline.
@@ -659,10 +1317,6 @@
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         const buf = ctx.getImageData(0, 0, W, H).data;
 
-        // Structure-first: show the generic grid detector on EVERY frame, before
-        // the ARAM-specific pipeline (which may find no bench on other screens).
-        renderGridStage(canvas, buf, W, H);
-
         // Run the EXACT pipeline the app uses (aram mode): benchAnchoredClient →
         // aramSlots → perceptualMatcher, reduced by runFrameRead. ctx.debug asks
         // matchSlot/matchCircle to also hand back each winner's crop hash/sig for
@@ -671,6 +1325,7 @@
         const frame = { buf, W, H };
         const read = runFrameRead(pipelineForMode(debugMode), frame, {
           iconHashById,
+          frameIsClient: frameIsClient(),
           debug: true,
           // The fixed reader assumes exact positions and matches tight; ask for
           // the wide per-slot search here so the debugger shows the same
@@ -684,6 +1339,8 @@
               (t ? ` (locate ${t.locateMs.toFixed(0)}ms)` : ""),
             true,
           );
+          out.prepend(labelStage(canvas, read));
+          renderGridStage(canvas, buf, W, H);
           return read;
         }
         const client = read.client;
@@ -925,6 +1582,11 @@
           out.appendChild(stage3);
         }
 
+        // Labelling goes on top: it is what you came to the frame to do, and
+        // its overlay is the one that shows where the reader put the boxes.
+        out.prepend(labelStage(canvas, read));
+        renderGridStage(canvas, buf, W, H);
+
         // The pipeline already deduped bench-first into read.ids.
         const benchIds = benchSlots
           .filter((p) => p.verdict !== "reject" && p.m)
@@ -954,6 +1616,15 @@
           URL.revokeObjectURL(url);
         }
       }
+
+      $("surface").addEventListener("change", () => {
+        if (lastFrameCanvas)
+          renderFrame(
+            lastFrameCanvas.canvas,
+            lastFrameCanvas.W,
+            lastFrameCanvas.H,
+          );
+      });
 
       document.getElementById("reader").addEventListener("change", (e) => {
         debugMode = e.target.value;
@@ -995,7 +1666,6 @@
       let liveTimer = null;
       const liveSrcCanvas = document.createElement("canvas"); // native-res grab
       const LIVE_MAX_W = 900;
-      const $ = (id) => document.getElementById(id);
 
       // Draw the current video frame into liveSrcCanvas at native resolution.
       function grabLive() {
@@ -1018,7 +1688,7 @@
         return runFrameRead(
           pipelineForMode(debugMode),
           { buf, W, H },
-          { iconHashById, debug: true },
+          { iconHashById, frameIsClient: frameIsClient(), debug: true },
         );
       }
 
@@ -1074,7 +1744,9 @@
             paintLive(readLive(dim.W, dim.H), dim.W, dim.H);
           } catch (_) {}
         }
-        liveTimer = setTimeout(liveTick, 650);
+        // While recording the player is in a game: keep the overlay alive but
+        // stop it competing for a core.
+        liveTimer = setTimeout(liveTick, recording ? 3000 : 650);
       }
 
       function setLiveButtons() {
@@ -1089,6 +1761,7 @@
         if (!iconHashById)
           return setStatus("Still building the database — one moment.", true);
         try {
+          liveSurface = null;
           liveStream = await navigator.mediaDevices.getDisplayMedia({
             video: { frameRate: 5 },
           });
@@ -1100,7 +1773,11 @@
         liveVideo.playsInline = true;
         liveVideo.srcObject = liveStream;
         await liveVideo.play();
-        liveStream.getVideoTracks()[0].addEventListener("ended", stopLive);
+        const track = liveStream.getVideoTracks()[0];
+        track.addEventListener("ended", stopLive);
+        // "window" | "browser" | "monitor" — the same signal the app reads.
+        liveSurface =
+          (track.getSettings && track.getSettings().displaySurface) || null;
         liveFrozen = false;
         $("livestage").hidden = false;
         $("livectrls").hidden = false;
@@ -1160,6 +1837,7 @@
         clearTimeout(liveTimer);
         liveTimer = null;
         if (liveStream) liveStream.getTracks().forEach((t) => t.stop());
+        stopRecording();
         liveStream = null;
         liveVideo = null;
         liveFrozen = false;
@@ -1169,12 +1847,485 @@
         setStatus("Live stopped.");
       }
 
+      // ---- recording samples while playing --------------------------------------
+      // The dataset problem: real champ-select frames only exist mid-game, when
+      // nobody has a hand free to Freeze and label. So recording is hands-off —
+      // keep a lossless full-resolution frame whenever the picture CHANGED
+      // (reveal, swap, reroll; not the ticking timer), into IndexedDB so a page
+      // reload or a crash loses nothing. Labelling happens afterwards, in
+      // review, one frame at a time with the last frame's labels carried
+      // forward. Export packs a session into one .zip in the test/cases format;
+      // scripts/import-recording.js unpacks it into the repo.
+      const REC_GAP_MS = 2000; // how often to look for a changed frame
+      const REC_MAX = 300; // per session — a forgotten recorder stops itself
+      const REC_THUMB_W = 64,
+        REC_THUMB_H = 36;
+      // A thumbnail pixel whose luminance moved this much counts as changed, and
+      // this many changed pixels make a new frame. One swapped bench icon moves
+      // ~4 thumbnail pixels at 1080p; the countdown timer alone mostly doesn't.
+      const REC_PIXEL_DIFF = 24;
+      const REC_MIN_CHANGED = 3;
+      let recording = null; // { session, n, bytes, lastThumb, timer }
+      const recCanvas = document.createElement("canvas");
+      const recThumb = document.createElement("canvas");
+      recThumb.width = REC_THUMB_W;
+      recThumb.height = REC_THUMB_H;
+
+      let sampleDbP = null;
+      function sampleDb() {
+        if (!sampleDbP)
+          sampleDbP = new Promise((res, rej) => {
+            const r = indexedDB.open("scan-samples", 1);
+            r.onupgradeneeded = () =>
+              r.result
+                .createObjectStore("samples", {
+                  keyPath: "id",
+                  autoIncrement: true,
+                })
+                .createIndex("session", "session");
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+          });
+        return sampleDbP;
+      }
+      async function idb(mode, fn) {
+        const db = await sampleDb();
+        return new Promise((res, rej) => {
+          const tx = db.transaction("samples", mode);
+          const req = fn(tx.objectStore("samples"));
+          tx.oncomplete = () => res(req.result);
+          tx.onerror = tx.onabort = () => rej(tx.error);
+        });
+      }
+      // A sample: { id, session, t, W, H, surface, png: Blob, labels: null |
+      // { bench: [10], allies: [5] } }.
+      const putSample = (s) => idb("readwrite", (st) => st.put(s));
+      const deleteSample = (id) => idb("readwrite", (st) => st.delete(id));
+      const allSamples = () => idb("readonly", (st) => st.getAll());
+      const sessionSamples = async (session) =>
+        (await allSamples())
+          .filter((s) => s.session === session)
+          .sort((a, b) => a.t - b.t);
+
+      const mb = (bytes) => (bytes / 1048576).toFixed(1) + " MB";
+      function sessionName(d) {
+        const p = (n) => String(n).padStart(2, "0");
+        return (
+          `rec-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+          `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+        );
+      }
+
+      // Luminance thumbnail of the current video frame, for change detection.
+      function liveThumb() {
+        const g = recThumb.getContext("2d", { willReadFrequently: true });
+        g.drawImage(liveVideo, 0, 0, REC_THUMB_W, REC_THUMB_H);
+        const px = g.getImageData(0, 0, REC_THUMB_W, REC_THUMB_H).data;
+        const lum = new Uint8Array(REC_THUMB_W * REC_THUMB_H);
+        for (let i = 0; i < lum.length; i++)
+          lum[i] =
+            (px[i * 4] * 77 + px[i * 4 + 1] * 150 + px[i * 4 + 2] * 29) >> 8;
+        return lum;
+      }
+      function thumbChanged(a, b) {
+        if (!a) return true;
+        let n = 0;
+        for (let i = 0; i < a.length; i++)
+          if (Math.abs(a[i] - b[i]) > REC_PIXEL_DIFF && ++n >= REC_MIN_CHANGED)
+            return true;
+        return false;
+      }
+
+      function updateRecStat() {
+        $("record").textContent = recording
+          ? "⏹ Stop recording"
+          : "⏺ Record samples";
+        $("record").classList.toggle("rec-on", !!recording);
+        $("recstat").textContent = recording
+          ? `● ${recording.n} frames · ${mb(recording.bytes)} · ${
+              recording.session
+            }`
+          : "";
+      }
+
+      function startRecording() {
+        if (!liveStream || recording) return;
+        // Ask the browser not to evict the dataset under storage pressure.
+        navigator.storage?.persist?.();
+        recording = {
+          session: sessionName(new Date()),
+          n: 0,
+          bytes: 0,
+          lastThumb: null,
+          timer: null,
+        };
+        updateRecStat();
+        recordTick();
+      }
+
+      function stopRecording(why) {
+        if (!recording) return;
+        clearTimeout(recording.timer);
+        const { n, session } = recording;
+        recording = null;
+        updateRecStat();
+        refreshSamples();
+        if (n)
+          setStatus(
+            `${
+              why ? why + " " : ""
+            }Recorded ${n} frames into ${session} — Review them below.`,
+          );
+      }
+
+      async function recordTick() {
+        const rec = recording;
+        if (!rec) return;
+        try {
+          if (liveVideo && liveVideo.videoWidth) {
+            const thumb = liveThumb();
+            // Fullscreen-exclusive League captures as black; don't store those.
+            const blank = thumb.every((v) => v < 8);
+            if (!blank && thumbChanged(rec.lastThumb, thumb)) {
+              const W = liveVideo.videoWidth,
+                H = liveVideo.videoHeight;
+              recCanvas.width = W;
+              recCanvas.height = H;
+              recCanvas.getContext("2d").drawImage(liveVideo, 0, 0, W, H);
+              const png = await new Promise((r) =>
+                recCanvas.toBlob(r, "image/png"),
+              );
+              if (png && recording === rec) {
+                await putSample({
+                  session: rec.session,
+                  t: Date.now(),
+                  W,
+                  H,
+                  surface: liveSurfaceKind(),
+                  png,
+                  labels: null,
+                });
+                rec.n++;
+                rec.bytes += png.size;
+                rec.lastThumb = thumb;
+              }
+            }
+          }
+        } catch (e) {
+          setStatus("Recording failed: " + e.message, true);
+          return stopRecording();
+        }
+        if (recording !== rec) return;
+        if (rec.n >= REC_MAX)
+          return stopRecording(`Hit the ${REC_MAX}-frame cap.`);
+        updateRecStat();
+        rec.timer = setTimeout(recordTick, REC_GAP_MS);
+      }
+
+      // ---- the samples list ----------------------------------------------------
+      async function refreshSamples() {
+        const el = $("samples");
+        let all;
+        try {
+          all = await allSamples();
+        } catch (e) {
+          el.textContent = "Sample storage unavailable: " + e.message;
+          return;
+        }
+        const by = new Map();
+        for (const s of all) {
+          const g = by.get(s.session) || { n: 0, labelled: 0, bytes: 0 };
+          g.n++;
+          if (s.labels) g.labelled++;
+          g.bytes += s.png.size;
+          by.set(s.session, g);
+        }
+        el.innerHTML = "";
+        el.appendChild(importButton());
+        if (!by.size) {
+          el.insertAdjacentHTML(
+            "beforeend",
+            "<span class='cap'>No recorded samples yet. Go live, then " +
+              "⏺ Record samples while you're in champ select.</span>",
+          );
+          return;
+        }
+        const head = document.createElement("b");
+        head.textContent = "Recorded samples";
+        head.style.flexBasis = "100%";
+        el.appendChild(head);
+        for (const [session, g] of [...by].sort().reverse()) {
+          const row = document.createElement("div");
+          row.className = "live";
+          row.style.flexBasis = "100%";
+          row.style.margin = "0";
+          row.innerHTML =
+            `<span>${session} — ${g.n} frames, ${g.labelled} labelled, ${mb(
+              g.bytes,
+            )}</span>` +
+            `<button type="button" data-a="review">✎ Review &amp; label</button>` +
+            `<button type="button" data-a="export">⬇ Export .zip</button>` +
+            `<button type="button" data-a="delete">🗑 Delete</button>`;
+          row.addEventListener("click", (e) => {
+            const a = e.target.dataset && e.target.dataset.a;
+            if (a === "review") openReview(session);
+            else if (a === "export") exportSession(session);
+            else if (a === "delete") deleteSession(session, g.n);
+          });
+          el.appendChild(row);
+        }
+      }
+
+      // An exported .zip back into this browser — to label a session that was
+      // recorded elsewhere, or whose browser copy is gone. Labels already in
+      // the zip come along; a session already here is replaced, not doubled.
+      function importButton() {
+        const label = document.createElement("label");
+        label.className = "cap";
+        label.innerHTML = `⤒ Import .zip <input type="file" accept=".zip,application/zip" hidden>`;
+        label.style.cursor = "pointer";
+        label.querySelector("input").addEventListener("change", (e) => {
+          const f = e.target.files[0];
+          if (f)
+            importZip(f).catch((err) =>
+              setStatus("Import failed: " + err.message, true),
+            );
+        });
+        return label;
+      }
+
+      async function importZip(file) {
+        const entries = readZip(new Uint8Array(await file.arrayBuffer()));
+        const byName = new Map(entries.map((e) => [e.name, e.data]));
+        const dec = new TextDecoder();
+        const imported = [];
+        for (const e of entries) {
+          if (!e.name.endsWith(".json")) continue;
+          const session = e.name.split("/")[0];
+          const j = JSON.parse(dec.decode(e.data));
+          const dir = e.name.slice(0, e.name.lastIndexOf("/") + 1);
+          const png = byName.get(dir + j.image.replace(/^\.\//, ""));
+          if (!png) continue;
+          const m = /at (\d+)x(\d+)/.exec(j.note || "");
+          const t = Date.parse((/recorded (\S+)/.exec(j.note || "") || [])[1]);
+          imported.push({
+            session,
+            t: Number.isFinite(t) ? t : imported.length,
+            W: m ? +m[1] : 0,
+            H: m ? +m[2] : 0,
+            surface: j.surface || "monitor",
+            png: new Blob([png], { type: "image/png" }),
+            labels:
+              j.labelled === false
+                ? null
+                : {
+                    client: j.client || null,
+                    boxes: j.boxes || null,
+                    bench: j.bench || Array(10).fill(null),
+                    allies: j.allies || Array(5).fill(null),
+                  },
+          });
+        }
+        if (!imported.length) throw new Error("no recorded frames in that zip");
+        for (const session of new Set(imported.map((s) => s.session)))
+          for (const s of await sessionSamples(session))
+            await deleteSample(s.id);
+        for (const s of imported) await putSample(s);
+        refreshSamples();
+        setStatus(
+          `Imported ${imported.length} frames (${
+            imported.filter((s) => s.labels).length
+          } labelled).`,
+        );
+      }
+
+      async function deleteSession(session, n) {
+        if (!confirm(`Delete ${session} (${n} frames)? This can't be undone.`))
+          return;
+        for (const s of await sessionSamples(session)) await deleteSample(s.id);
+        if (review && review.session === session) closeReview();
+        refreshSamples();
+      }
+
+      // One zip per session, laid out the way scripts/case-set.js reads it:
+      // <session>/NNN.png + NNN.json. A frame labelled entirely empty is "not
+      // champ select" and must DECLINE — that is how in-game false positives
+      // get into the dataset too.
+      async function exportSession(session) {
+        const list = await sessionSamples(session);
+        const enc = new TextEncoder();
+        const files = [];
+        for (const [k, s] of list.entries()) {
+          const name = String(k).padStart(3, "0");
+          const L = s.labels;
+          // Not champ select = every slot labelled empty. Names without boxes
+          // are still a valid label (the frame just carries no geometry).
+          const empty = L && [...L.bench, ...L.allies].every((v) => v == null);
+          const json = {
+            image: `./${name}.png`,
+            surface: s.surface,
+            note: `recorded ${new Date(s.t).toISOString()} at ${s.W}x${s.H}`,
+            ...(L
+              ? { ...(empty ? { expect: "decline" } : {}), ...L }
+              : { labelled: false }),
+          };
+          files.push({
+            name: `${session}/${name}.png`,
+            data: new Uint8Array(await s.png.arrayBuffer()),
+          });
+          files.push({
+            name: `${session}/${name}.json`,
+            data: enc.encode(JSON.stringify(json, null, 2) + "\n"),
+          });
+        }
+        download(
+          new Blob([buildZip(files)], { type: "application/zip" }),
+          `scan-samples-${session}.zip`,
+        );
+        const labelled = list.filter((s) => s.labels).length;
+        setStatus(
+          `Exported ${list.length} frames (${labelled} labelled). Unpack with: ` +
+            `node scripts/import-recording.js scan-samples-${session}.zip`,
+          labelled === 0,
+        );
+      }
+
+      // ---- review: label recorded frames ---------------------------------------
+      async function openReview(session) {
+        const samples = await sessionSamples(session);
+        if (!samples.length) return;
+        const first = samples.findIndex((s) => !s.labels);
+        review = { session, samples, i: Math.max(0, first), sample: null };
+        $("reviewbar").hidden = false;
+        showReviewed();
+      }
+
+      // Labels to pre-fill: this frame's own, else the nearest earlier labelled
+      // frame's (a champ select changes a slot or two between frames, not all
+      // fifteen). An all-empty carry is a "not champ select" frame — useless as
+      // a starting point, so fall back to the reader's guess.
+      function reviewCarry() {
+        for (let k = review.i; k >= 0; k--) {
+          const L = review.samples[k].labels;
+          if (L) {
+            if ([...L.bench, ...L.allies].some((v) => v != null)) return L;
+            if (k === review.i) return L;
+            return null;
+          }
+        }
+        return null;
+      }
+      // The nearest earlier frame you labelled with boxes (its rect + boxes).
+      function reviewCarriedLabel() {
+        for (let k = review.i - 1; k >= 0; k--) {
+          const L = review.samples[k].labels;
+          if (L && L.client) return L;
+        }
+        return null;
+      }
+      function reviewPrefill(i, guess) {
+        const L = review.carry;
+        if (!L) return guess;
+        const v = i < 10 ? L.bench[i] : L.allies[i - 10];
+        return v == null ? "" : v;
+      }
+
+      async function showReviewed() {
+        const s = review.samples[review.i];
+        review.sample = s;
+        review.carry = reviewCarry();
+        $("revpos").textContent = `${review.session} · frame ${review.i + 1}/${
+          review.samples.length
+        }`;
+        showSaved(s.labels ? "✓ saved" : "not labelled yet", !s.labels);
+        // Until this frame's label stage is up, a confirm would save nothing.
+        review.currentLabels = null;
+        $("revok").disabled = true;
+        $("revprev").disabled = review.i === 0;
+        $("revnext").disabled = review.i === review.samples.length - 1;
+        const url = URL.createObjectURL(s.png);
+        try {
+          render(await loadImg(url));
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+        $("reviewbar").scrollIntoView({ block: "nearest" });
+      }
+
+      function reviewStep(d) {
+        if (!review) return;
+        const i = review.i + d;
+        if (i < 0 || i >= review.samples.length) return;
+        review.i = i;
+        showReviewed();
+      }
+
+      function showSaved(text, bad) {
+        $("revsaved").textContent = text;
+        $("revsaved").style.color = bad ? "var(--reject)" : "var(--accept)";
+      }
+
+      // Store the labels on screen for the frame under review. Called on every
+      // edit, so it must be cheap to repeat and loud when it fails.
+      async function persistLabels(labels) {
+        if (!review) return false;
+        const sample = review.sample;
+        sample.labels = labels;
+        try {
+          await putSample(sample);
+        } catch (e) {
+          showSaved("⚠ NOT saved", true);
+          setStatus("Saving labels failed: " + e.message, true);
+          return false;
+        }
+        if (review && review.sample === sample) showSaved("✓ saved");
+        refreshSamples();
+        return true;
+      }
+
+      // "These labels are right": save (even untouched — that IS the answer)
+      // and move on.
+      async function confirmReviewed() {
+        if (!review || !review.currentLabels) return;
+        if (!(await persistLabels(review.currentLabels()))) return;
+        if (review.i < review.samples.length - 1) return reviewStep(1);
+        showReviewed();
+        setStatus("Last frame labelled — ⬇ Export .zip when you're done.");
+      }
+
+      async function discardReviewed() {
+        if (!review) return;
+        await deleteSample(review.sample.id);
+        review.samples.splice(review.i, 1);
+        refreshSamples();
+        if (!review.samples.length) return closeReview();
+        review.i = Math.min(review.i, review.samples.length - 1);
+        showReviewed();
+      }
+
+      function closeReview() {
+        review = null;
+        $("reviewbar").hidden = true;
+        out.innerHTML = "";
+        lastFrameCanvas = null;
+        refreshSamples();
+      }
+
       $("golive").addEventListener("click", startLive);
       $("freeze").addEventListener("click", freezeLive);
       $("step").addEventListener("click", stepLive);
       $("resume").addEventListener("click", resumeLive);
       $("export").addEventListener("click", exportLive);
       $("stoplive").addEventListener("click", stopLive);
+      $("record").addEventListener("click", () =>
+        recording ? stopRecording() : startRecording(),
+      );
+      $("revprev").addEventListener("click", () => reviewStep(-1));
+      $("revnext").addEventListener("click", () => reviewStep(1));
+      $("revdrop").addEventListener("click", discardReviewed);
+      $("revdone").addEventListener("click", closeReview);
+      $("revok").addEventListener("click", confirmReviewed);
+      refreshSamples();
 
       buildHashes().catch((e) =>
         setStatus("Failed to load champion database: " + e.message, true),

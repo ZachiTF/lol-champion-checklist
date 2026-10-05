@@ -1,0 +1,18 @@
+{
+  "image": "../fixtures/aram-bench.png",
+  "surface": "window",
+  "note": "1274x706 window share, frame == client, clean bench",
+  "bench": [
+    "Gragas",
+    "XinZhao",
+    "Zeri",
+    "Yasuo",
+    "AurelionSol",
+    "Elise",
+    "Lissandra",
+    null,
+    null,
+    null
+  ],
+  "allies": ["Velkoz", "Malphite", "Vex", "Xerath", "Aphelios"]
+}

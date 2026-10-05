@@ -62,6 +62,8 @@ self.onmessage = (e) => {
       tight: !!m.tight,
       client: m.client || null,
       frameIsClient: !!m.frameIsClient,
+      // Whether this call may pay for the scale-ladder rescue (see scan-aram.js).
+      rescue: m.rescue !== false,
     };
     const r = runFrameRead(pipelineFor(m.mode), frame, ctx);
     if (!r.client) {

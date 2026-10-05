@@ -429,6 +429,7 @@ async function scanFrameAsync(buf, w, h, opts) {
     client: null,
     tight: false,
     frameIsClient: false,
+    rescue: true,
     ...(opts || {}),
   };
   const worker = ensureScanWorker();
@@ -471,6 +472,7 @@ async function scanFrameAsync(buf, w, h, opts) {
     tight: o.tight,
     client: o.client,
     frameIsClient: o.frameIsClient,
+    rescue: o.rescue,
   };
   const r = runFrameRead(getScanPipeline(o.mode), frame, ctx);
   if (!r.client) return { layout: null };
@@ -924,6 +926,14 @@ function liveGoBack(why) {
 // poll often and build a consensus from many frames rather than trusting one.
 const LIVE_INTERVAL_MS = 600; // wait between reading-phase checks (shown as countdown)
 const LIVE_WATCH_MS = 3000; // cheap "still in champ select?" re-check interval
+// Looking for champion select polls several times a second, and most of those
+// frames are not champion select at all. The locate stage's scale-ladder rescue
+// (for a client that is not at the frame's own scale — see scan-aram.js) costs
+// ~10x a cheap locate, so it runs on every Nth watching poll rather than all of
+// them: unusual setups are still found within a few seconds, without pinning a
+// core while someone is in a game.
+const LIVE_RESCUE_EVERY = 5;
+let liveWatchPolls = 0;
 const LIVE_WINDOW_GONE_MS = 8000; // window share: gone this long → game started
 const LIVE_SCREEN_GONE_MS = 15000; // screen share: gone this long (alt-tab tolerant)
 const LIVE_SCREEN_MAX_MS = 120000; // screen share: hard cap after a full read
@@ -1172,9 +1182,13 @@ async function liveLoop() {
     // full locate when we don't. Runs in the Web Worker when available, so the UI
     // stays smooth during the first read and the watching-phase locates.
     const cached = !!liveLayout;
+    // A cached rect needs no locate at all; without one, pay for the full
+    // search only every LIVE_RESCUE_EVERY polls.
+    const rescue = !cached && liveWatchPolls++ % LIVE_RESCUE_EVERY === 0;
     const res = await scanFrameAsync(frame.buf, frame.w, frame.h, {
       client: liveLayout,
       tight: cached,
+      rescue,
       // Sharing a single window means the captured surface IS champion select,
       // so the fixed template can skip looking for the client's own borders.
       frameIsClient: liveSurface === "window",

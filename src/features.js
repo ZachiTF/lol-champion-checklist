@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 7;
+const FEATURES_VERSION = 8;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -132,6 +132,22 @@ const FEATURE_LIST = [
       {
         title: "Says when it isn't sure",
         desc: "rather than pinning a confident-looking wrong guess, it tells you it couldn't find champion select and points you at the other reader.",
+      },
+    ],
+  },
+  {
+    icon: "🎯",
+    title: "Scanning gets the champions right",
+    desc: "Reading champion select now decides what it found by checking the champions themselves — how clearly each icon beats the runner-up — instead of trusting the window outline. Wrong names were the common failure; they are now rare.",
+    since: 8,
+    sub: [
+      {
+        title: "Copes with a scaled or cropped capture",
+        desc: "a shared window is almost never delivered at its true pixel size. It now finds champion select across a wide range of scales, including captures cropped into the client.",
+      },
+      {
+        title: "Refuses look-alikes",
+        desc: "a screen full of champion icons — this app's own grid, say — no longer reads as a champion-select bench.",
       },
     ],
   },

@@ -110,13 +110,30 @@ to the committed snapshot. See `data/README.md` for details.
 - `index.html` — app shell (loads the `src/` scripts in order)
 - `src/` — app logic, split by concern (classic scripts sharing globals, no build step):
   - `scan-core.js` — pure screenshot-scan pipeline math (also runs in Node; unit-tested): the perceptual matcher, the modular `ClientFinder → SlotProvider → IconMatcher` pipeline, the mode registry, and the **adaptive** ARAM reader, which finds the bench anywhere in the frame at any scale via periodicity + champion content
-  - `scan-aram.js` — the **default** reader: the hardcoded ARAM: Mayhem layout. Every icon sits at a known fraction of the champ-select client rectangle, so the only thing to work out is that rectangle (a window/tab share IS it; otherwise a 16:9 window is located from its borders and a bench-comb alignment score polishes it). Faster than the adaptive reader and far harder to point at the wrong thing; it declines rather than guessing when it can't find the client. Fractions were measured with `scripts/measure-layout.js`
+  - `scan-aram.js` — the **default** reader: the hardcoded ARAM: Mayhem layout. Every icon sits at a known fraction of the champ-select client rectangle, so the only thing to work out is that rectangle (a window/tab share IS it; otherwise a 16:9 window is located from its borders and a bench-comb alignment score polishes it). A **scale ladder** re-seeds that rectangle when the client isn't at the frame's own scale — a capture cropped into the client, where the client is wider than the picture. Which candidate wins is decided by **champion evidence**, not by the edge score: the median gap between each icon's best match and its runner-up, across the bench _and_ the ally column. The edge score ranks; evidence decides, and declines. Fractions were measured with `scripts/measure-layout.js`
   - `scan-ui.js` — scan overlay, paste/drop, icon hashing, the reader switch, the "Available now" group
   - `features.js` — the Features & guide overlay (opened via ❔ in the settings drawer; keep `FEATURE_LIST` current when shipping features)
   - `state.js` · `champions.js` · `render.js` · `history.js` · `riot-api.js` · `main.js`
 - `style.css` — styling
-- `scan-debug.html` — interactive debugger for the screenshot-scan pipeline
+- `scan-debug.html` — interactive debugger for the screenshot-scan pipeline, and
+  where you turn a frame that read wrong into a regression case (Stage 4 pre-fills
+  each slot with the reader's own guess; fix the wrong ones and export). In live
+  mode, **⏺ Record samples** keeps every changed frame (lossless, in IndexedDB)
+  while you play; afterwards **Review & label** steps through them with the
+  previous frame's labels carried forward, and **Export .zip** packs the session
+- `scripts/import-recording.js` — unpacks an exported session into
+  `test_data/recordings/` (gitignored; `--to=test/cases` to promote frames into
+  the regression suite). Then `node scripts/scan-report.js --dir=test_data/recordings`
+  measures the reader over the whole recorded dataset
+- `scripts/scan-report.js` — the scan diagnostic. Runs every labelled case and
+  says per slot what was expected, what was read, and **where the correct
+  champion ranked** — which separates "right answer, refused" from "the crop
+  isn't on the icon" without squinting at screenshots. `--scale` adds a
+  0.6x-1.5x resample sweep, `--slots` shows every slot
 - `test/` — `node:test` regression tests + fixtures (run with `npm test`)
+- `test/cases/` — labelled screenshots (`<name>.png` + `<name>.json`) that both
+  the report and `test/scan-cases.test.js` read. Dropping a pair in adds a
+  regression case with no code change; see `scripts/case-set.js` for the format
 - `data/` — generated filter files
 - `scripts/` — data generation scripts, plus `measure-layout.js` (dev-only: brute-forces the true pixel position of known champions in a screenshot, which is how `scan-aram.js`'s layout fractions were calibrated)
 - `vendor/` — vendored third-party libraries (canvas-confetti; the jsdelivr

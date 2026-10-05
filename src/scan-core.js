@@ -483,6 +483,43 @@ function locateLayout(buf, W, H, iconHashById) {
  * @param {{ tight?: boolean }} [opts]
  * @returns {SlotMatch|null} best match (with `.alts` runners-up), or null
  */
+// ---- identity margin --------------------------------------------------------
+// Which champion won matters less than by HOW MUCH. With 173 candidates, the
+// absolute distance mostly measures the capture (a dim or rescaled frame pushes
+// every distance up together), while the gap to the runner-up measures whether
+// the crop really is that champion. The reference icons are only 18.9-21.5 apart
+// at their closest, so absolute thresholds alone cannot separate "this champion"
+// from "some champion".
+//
+// The margin DOWNGRADES a confident verdict to an uncertain one. It never
+// rejects, and the reason is worth keeping straight, because the tempting
+// version of this rule is wrong in two different ways:
+//
+//   * On the BENCH a misread is almost always the whole row slipped by one cell,
+//     so every crop still sits squarely on a real icon: measured over test/cases
+//     across a 0.6x-1.5x sweep, wrong bench reads have a median margin of 17.4 —
+//     the same as correct ones. The margin cannot see that error at all. The
+//     locate stage can, by cross-checking the ally column (aramBenchEvidence in
+//     scan-aram.js), and that is where the check belongs.
+//   * A low margin is also the NORMAL state of a legitimately hard slot. A bench
+//     champion under the swap-cooldown shadow has its identity at the noise
+//     floor by nature (the occupancy rescue below exists for exactly that), and
+//     correct ally circles located by the adaptive reader's own geometry measure
+//     0.7-2.9 because its crops are looser than the fixed template's. Rejecting
+//     on margin would throw all of those away.
+//
+// So: deciding WHETHER this is champion select is the locate stage's job, and
+// deciding HOW SURE we are about a name is this one's.
+const SCAN_MIN_MARGIN = 3;
+
+/** Gap from the best champion to the next DIFFERENT one, Infinity if alone. */
+function runnerUpMargin(ranked) {
+  const best = ranked[0];
+  if (!best) return 0;
+  const up = ranked.find((r) => r.id !== best.id);
+  return up ? up.score - best.score : Infinity;
+}
+
 function matchSlot(buf, W, H, slot, iconHashById, opts) {
   // Keep the best score seen per champion id across the whole local search, so we
   // can return not just the winner but the runner-up champions (best.alts). The
@@ -544,6 +581,8 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
   if (!per.size) return null;
   const ranked = [...per.values()].sort((a, b) => a.score - b.score);
   const best = { ...ranked[0], alts: ranked.slice(0, 4) };
+  // How far the winner pulled away from the next champion. See SCAN_MIN_MARGIN.
+  best.margin = runnerUpMargin(ranked);
   // Occupancy of the slot itself (independent of which champion won) so
   // classifyMatch can tell a shadowed-but-filled slot from an empty one.
   best.fill = fillStd(buf, W, H, slot.cx, slot.cy, s);
@@ -562,7 +601,19 @@ function matchSlot(buf, W, H, slot, iconHashById, opts) {
 // color-signature distance is the real filled-vs-empty discriminator.
 function classifyMatch(m) {
   if (!m) return "reject";
-  if (m.color <= SCAN_ACCEPT_COLOR && m.ham <= SCAN_ACCEPT_HAM) return "accept";
+  // The margin only ever downgrades CONFIDENT to UNCERTAIN here; it never
+  // rejects. A bench slot under the swap-cooldown shadow legitimately has its
+  // identity at the noise floor — that is what the occupancy rescue below is
+  // for — and rejecting it by margin would drop a champion that is really there.
+  // Catching a misaligned rect is the locate stage's job (aramBenchEvidence),
+  // not this function's.
+  const margin = m.margin == null ? Infinity : m.margin;
+  if (
+    m.color <= SCAN_ACCEPT_COLOR &&
+    m.ham <= SCAN_ACCEPT_HAM &&
+    margin >= SCAN_MIN_MARGIN
+  )
+    return "accept";
   if (m.color <= SCAN_MAYBE_COLOR && m.ham <= SCAN_MAYBE_HAM) return "maybe";
   // Occupancy rescue: a color-rejected slot that is clearly filled (champion-level
   // contrast) and still names a plausible champion is a real champion dimmed by a
@@ -785,7 +836,10 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   // distances (~16→21) and flipping picks. `dsT` is a smaller size step than the
   // full search so it stays cheap. (Tunable via opts.tightConfig.)
   const tc = (opts && opts.tightConfig) || TIGHT_CIRCLE;
-  const dsT = Math.max(3, Math.round(tc.dsFactor * ds));
+  const dsT = Math.max(
+    3,
+    Math.round((tc.dsFactor ?? TIGHT_CIRCLE.dsFactor) * ds),
+  );
   const off = tight ? tc.off : Math.max(9, Math.round(9 * f));
   const step = tight ? tc.step : Math.max(3, Math.round(3 * f));
   const sizes = tight
@@ -797,7 +851,7 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   let win = null,
     winScore = Infinity;
   for (const size of sizes) {
-    if (size < 16) continue;
+    if (!(size >= 16)) continue;
     for (let dx = -off; dx <= off; dx += step) {
       for (let dy = -off; dy <= off; dy += step) {
         const x0 = Math.round(circle.cx - size / 2 + dx);
@@ -827,6 +881,8 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   if (!per.size) return null;
   const ranked = [...per.values()].sort((a, b) => a.score - b.score);
   const best = { ...ranked[0], alts: ranked.slice(0, 4) };
+  // How far the winner pulled away from the next champion. See SCAN_MIN_MARGIN.
+  best.margin = runnerUpMargin(ranked);
   if (win) {
     best.pos = { x0: win.x0, y0: win.y0, size: win.size };
     if (opts && opts.debug) {
@@ -841,7 +897,17 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
 // "empty" case — only accept vs uncertain (flagged) vs reject (detection junk).
 function classifyCircleMatch(m) {
   if (!m) return "reject";
-  if (m.color <= CIRCLE_ACCEPT_COLOR && m.ham <= CIRCLE_ACCEPT_HAM)
+  // Circles benefit from this more than the bench does: their distance
+  // thresholds are the loosest in the pipeline (CIRCLE_MAYBE admits a combined
+  // score of 42, while two DIFFERENT champions sit only 33.6 apart at the
+  // median), so absolute distance alone lets a wrong portrait through as a
+  // confident name.
+  const margin = m.margin == null ? Infinity : m.margin;
+  if (
+    m.color <= CIRCLE_ACCEPT_COLOR &&
+    m.ham <= CIRCLE_ACCEPT_HAM &&
+    margin >= SCAN_MIN_MARGIN
+  )
     return "accept";
   if (m.color <= CIRCLE_MAYBE_COLOR && m.ham <= CIRCLE_MAYBE_HAM)
     return "maybe";
@@ -1618,72 +1684,78 @@ function runFrameRead(pipeline, frame, ctx) {
 
 // Dual-use: expose the pure API to Node (tests) without disturbing the browser,
 // where these top-level declarations are already globals shared across scripts.
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    pxLum,
-    pxSat,
-    fillStd,
-    dHashRegion,
-    colorSigRegion,
-    hamming64,
-    colorDist,
-    findBenchBar,
-    locateLayout,
-    clientFromBench,
-    circleRegionFromBench,
-    circleRegionFromClientRect,
-    benchFromClientRect,
-    matchSlot,
-    classifyMatch,
-    detectTeamCircles,
-    detectTeamCirclesIn,
-    matchCircle,
-    classifyCircleMatch,
-    readBench,
-    readPicks,
-    combineReads,
-    classifySlotOccupancy,
-    verifyLayout,
-    VERIFY_EMPTY_FILL,
-    VERIFY_MIN_EXPLAINED,
-    createScanAggregator,
-    aggregateFrame,
-    aggregateResult,
-    circleIconRect,
-    // Generic grid-structure detection (identity-free)
-    rowEdgeProfile,
-    autocorrPitch,
-    combPhaseCount,
-    detectGridByProjection,
-    detectGrids,
-    GRID_DETECTORS,
-    GRID_PITCH_MIN,
-    GRID_PITCH_MAX,
-    // Modular pipeline (Frame → ClientFinder → SlotProvider → IconMatcher)
-    wholeFrameClient,
-    benchAnchoredClient,
-    aramSlots,
-    arenaSlots,
-    riftSlots,
-    perceptualMatcher,
-    toSpotMatch,
-    createPipeline,
-    SCAN_MODES,
-    SCAN_DEFAULT_MODE,
-    SCAN_FALLBACK_MODE,
-    registerScanMode,
-    pipelineForMode,
-    runFrameRead,
-    AGG_WINDOW,
-    AGG_CONFIRM,
-    SCAN_ACCEPT_COLOR,
-    SCAN_ACCEPT_HAM,
-    SCAN_MAYBE_COLOR,
-    SCAN_MAYBE_HAM,
-    CIRCLE_ICON_FRAC,
-    CIRCLE_ACCEPT_COLOR,
-    CIRCLE_ACCEPT_HAM,
-    CIRCLE_MAYBE_COLOR,
-    CIRCLE_MAYBE_HAM,
-  };
-}
+// The public API as ONE object, identical in Node, the page and the Web Worker.
+// Sibling scripts (scan-aram.js) must read the core through this, never through
+// globalThis: a classic script's top-level `const` (every tuning constant here)
+// is NOT a property of globalThis, so `globalThis.SOME_CONST` is undefined in the
+// browser while `require()` returns the real value — tests pass, the app breaks.
+const SCAN_CORE = {
+  pxLum,
+  pxSat,
+  fillStd,
+  dHashRegion,
+  colorSigRegion,
+  hamming64,
+  colorDist,
+  findBenchBar,
+  locateLayout,
+  clientFromBench,
+  circleRegionFromBench,
+  circleRegionFromClientRect,
+  benchFromClientRect,
+  matchSlot,
+  classifyMatch,
+  detectTeamCircles,
+  detectTeamCirclesIn,
+  matchCircle,
+  classifyCircleMatch,
+  readBench,
+  readPicks,
+  combineReads,
+  classifySlotOccupancy,
+  verifyLayout,
+  VERIFY_EMPTY_FILL,
+  VERIFY_MIN_EXPLAINED,
+  createScanAggregator,
+  aggregateFrame,
+  aggregateResult,
+  circleIconRect,
+  // Generic grid-structure detection (identity-free)
+  rowEdgeProfile,
+  autocorrPitch,
+  combPhaseCount,
+  detectGridByProjection,
+  detectGrids,
+  GRID_DETECTORS,
+  GRID_PITCH_MIN,
+  GRID_PITCH_MAX,
+  // Modular pipeline (Frame → ClientFinder → SlotProvider → IconMatcher)
+  wholeFrameClient,
+  benchAnchoredClient,
+  aramSlots,
+  arenaSlots,
+  riftSlots,
+  perceptualMatcher,
+  toSpotMatch,
+  createPipeline,
+  SCAN_MODES,
+  SCAN_DEFAULT_MODE,
+  SCAN_FALLBACK_MODE,
+  registerScanMode,
+  pipelineForMode,
+  runFrameRead,
+  AGG_WINDOW,
+  AGG_CONFIRM,
+  SCAN_ACCEPT_COLOR,
+  SCAN_ACCEPT_HAM,
+  SCAN_MAYBE_COLOR,
+  SCAN_MAYBE_HAM,
+  CIRCLE_ICON_FRAC,
+  CIRCLE_ACCEPT_COLOR,
+  CIRCLE_ACCEPT_HAM,
+  CIRCLE_MAYBE_COLOR,
+  CIRCLE_MAYBE_HAM,
+  SCAN_MIN_MARGIN,
+  runnerUpMargin,
+};
+if (typeof module !== "undefined" && module.exports) module.exports = SCAN_CORE;

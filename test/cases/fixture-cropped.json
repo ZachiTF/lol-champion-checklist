@@ -1,0 +1,18 @@
+{
+  "image": "../fixtures/aram-bench-2.png",
+  "surface": "window",
+  "note": "cropped INTO the client: its own borders are off-frame and the client is WIDER than the capture, so the rect is only reachable by re-seeding the scale (ARAM_SCALE_LADDER)",
+  "bench": [
+    "RekSai",
+    "Corki",
+    "Kled",
+    "Jayce",
+    "Sejuani",
+    "Renata",
+    null,
+    null,
+    null,
+    null
+  ],
+  "allies": ["Malzahar", "AurelionSol", "Fiddlesticks", "MissFortune", "Mel"]
+}

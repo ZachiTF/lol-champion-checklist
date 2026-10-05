@@ -1,0 +1,8 @@
+{
+  "image": "../fixtures/negative-champion-grid.png",
+  "surface": "monitor",
+  "expect": "decline",
+  "note": "this app's OWN champion grid filling the screen, no League client anywhere: a regular lattice of champion icons is the thing a bench detector is most likely to mistake for a bench, so it must decline",
+  "bench": [null, null, null, null, null, null, null, null, null, null],
+  "allies": [null, null, null, null, null]
+}

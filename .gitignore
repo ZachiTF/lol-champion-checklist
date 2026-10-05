@@ -6,3 +6,5 @@ config.local.js
 test-history-import.json
 scratch-*.png
 test_data
+# Raw recorded sessions (full-res, other players' names) — see scripts/import-recording.js
+screen_recordings/
