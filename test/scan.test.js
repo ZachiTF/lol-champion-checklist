@@ -756,9 +756,10 @@ const EXPECTED_4_CLEAR = [
 const EXPECTED_4_CIRCLES = ["Nautilus", "Sion", "Thresh", "Varus", "Seraphine"];
 
 test("cooldown: the swap-cooldown champion is surfaced, not dropped as empty", () => {
-  // Slot 4 carries the cooldown shadow; its identity is at the noise floor under
-  // the shadow, but it must not be rejected as an empty slot (issue #1).
-  assert.equal(slotVerdicts[4], "maybe");
+  // Slot 4 carries the cooldown shadow. It must not be rejected as an empty slot
+  // (issue #1); since matchSlot undoes the shadow (detectShade) it is usually
+  // read outright rather than merely rescued as uncertain.
+  assert.notEqual(slotVerdicts[4], "reject");
   // The one genuinely empty slot (last) is still rejected.
   assert.equal(slotVerdicts[9], "reject");
 });
@@ -770,6 +771,80 @@ test("cooldown: the eight clearly-visible bench champions are all recognized", (
 
 test("cooldown: all five team-pick champions resolve on a centered client", () => {
   assert.deepEqual(r4.circleIds, EXPECTED_4_CIRCLES);
+});
+
+// ---- the client's darkening overlays, undone (detectShade) ----
+// Paint the overlay the client draws — measured off real recordings as a flat
+// blend toward (0.5, 10, 17) — over a clear bench icon, and read it back.
+function shadeSlot(src, Wd, slot, alpha, theta) {
+  const out = Uint8ClampedArray.from(src);
+  const half = slot.size / 2;
+  for (let y = Math.ceil(slot.cy - half); y < slot.cy + half; y++)
+    for (let x = Math.ceil(slot.cx - half); x < slot.cx + half; x++) {
+      let t = Math.atan2(x - slot.cx, slot.cy - y);
+      if (t < 0) t += 2 * Math.PI;
+      if (t < (theta * Math.PI) / 180) continue; // the lit sector
+      const i = (y * Wd + x) * 4;
+      [0.5, 10, 17].forEach((c, k) => {
+        out[i + k] = alpha * src[i + k] + (1 - alpha) * c;
+      });
+    }
+  return out;
+}
+
+for (const [label, alpha, theta] of [
+  ["half-way swap-cooldown wipe", 0.15, 180],
+  ["early swap-cooldown wipe", 0.15, 60],
+  ["pick-phase dim", 0.3, 0],
+])
+  test(`shade: a bench icon under a ${label} is restored and read`, () => {
+    for (const k of [0, 1, 2]) {
+      const slot = bench4.slots[k];
+      const b = shadeSlot(png4.data, W4, slot, alpha, theta);
+      const m = core.matchSlot(b, W4, H4, slot, iconHashById);
+      assert.ok(m.shade, `slot ${k}: the overlay should be detected`);
+      assert.equal(m.id, EXPECTED_4_CLEAR[k], `slot ${k}`);
+      assert.equal(core.classifyMatch(m), "accept", `slot ${k}`);
+    }
+  });
+
+test("shade: a clear icon and an empty panel are left alone", () => {
+  for (const k of [0, 1, 2, 9])
+    assert.equal(
+      core.detectShade(png4.data, W4, H4, bench4.slots[k]),
+      null,
+      `slot ${k}`,
+    );
+});
+
+test("circles: an empty 'Picking...' circle is rejected, not read as a champion", () => {
+  // A flat dark disc inside a bright ring — what a team circle shows while
+  // that player is still picking. The ring reaches the square crop's corners.
+  const S = 120,
+    c = S / 2,
+    b = new Uint8ClampedArray(S * S * 4);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const i = (y * S + x) * 4,
+        r = Math.hypot(x - c, y - c);
+      const v = r > 27 && r < 31 ? 200 : 22;
+      b[i] = v;
+      b[i + 1] = v * 0.8;
+      b[i + 2] = v * 0.4;
+      b[i + 3] = 255;
+    }
+  const m = core.matchCircle(
+    b,
+    S,
+    S,
+    { cx: c, cy: c, size: 49 },
+    iconHashById,
+    {
+      tight: true,
+    },
+  );
+  assert.ok(m.fill < core.CIRCLE_EMPTY_FILL);
+  assert.equal(core.classifyCircleMatch(m), "reject");
 });
 
 // ---- windowed client on a busy desktop (browser chrome + high-contrast UI) ----

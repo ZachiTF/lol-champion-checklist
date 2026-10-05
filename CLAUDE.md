@@ -49,5 +49,14 @@ review bar shows ✓ saved); `⤒ Import .zip` loads an export back in to label 
   `globalThis`; cross-file access goes through the `SCAN_CORE` object, never
   `globalThis`. `test/scan-classic-scripts.test.js` loads the files the way the
   page and the worker do — keep it passing.
+- Most wrong bench names were never the matcher: the client darkens icons with
+  a flat alpha blend (swap-cooldown clock wipe 0.15, pick phase 0.30, both
+  toward rgb(0.5,10,17)). `detectShade`/`unshadePatch` in `scan-core.js` undo
+  it before hashing. If shaded slots regress, check the overlay constants
+  against a recorded frame before touching a matcher threshold.
+- Open: a few ally circles (Master Yi, Yone, Locke in the Oct-4 recordings)
+  rank the true champion ~100+ with the boxes dead on the ring. The cause is
+  unverified. Earlier work found circles show default art, not skins, so
+  compare the on-screen crop against the reference icon before guessing.
 - Template fractions (`ARAM_TEMPLATE` in `src/scan-aram.js`) were measured
   with `scripts/measure-layout.js`; re-measure there, don't hand-edit.

@@ -25,6 +25,10 @@ const SCAN_MAYBE_HAM = 24;
 // reject→maybe, so the color-based empty rejection is untouched.
 const SCAN_FILL_STD = 20; // luminance std above this = a filled (not empty) slot
 const SCAN_FILL_HAM = 22; // dHash must still roughly name a champion to rescue
+// Below this luminance std a bench slot is an empty panel, full stop: empty
+// panels measure 0.6-9.8, champions 14+ even dimmed (and 40+ once matchSlot
+// has undone the overlay). One empty panel's colour sat inside the MAYBE band.
+const SCAN_EMPTY_FILL = 11;
 
 // "Tight" per-slot search window for fast live reads (geometry cached from a prior
 // full read). `off`/`step` bound the position search; `ds` are the icon-size
@@ -520,7 +524,166 @@ function runnerUpMargin(ranked) {
   return up ? up.score - best.score : Infinity;
 }
 
+// ---- bench shade: undo the client's darkening overlays ----------------------
+// The client darkens bench icons with a flat alpha blend toward one dark blue,
+// in two states. Both were measured by regressing a dimmed frame's pixels on
+// the same icon's undimmed pixels a few frames later (rmse < 1.6 per channel,
+// test_data/recordings rec-20261004-144140/004 vs 005 and -155533/003 vs 006):
+//
+//   swap cooldown   pixel = 0.15 * art + 0.85 * SHADE_RGB, inside a clock wipe:
+//                   lit from 12 o'clock clockwise to angle θ, shaded from θ
+//                   back round to 12, θ growing as the cooldown runs out
+//   pick phase      pixel = 0.30 * art + 0.70 * SHADE_RGB, the whole icon
+//
+// Hashing the shaded pixels is what made those slots fail: the wipe's straight
+// edge dominates the dHash and the dimming drags the colour signature onto
+// dark champions. Because the blend is known exactly it can be inverted, and
+// matchSlot then judges the restored view against the raw one.
+const SHADE_RGB = [0.5, 10, 17];
+const SHADE_WIPE_ALPHA = 0.15;
+const SHADE_DIM_ALPHA = 0.3;
+// A shaded pixel can be no brighter than alpha * 255 + the overlay's own share.
+// Max channel over the icon interior: a dimmed icon measures 81-105, a lit one
+// 240-255, and an empty panel stays under ~60 but has no contrast (std <= 7
+// against 14-20 for a dimmed icon).
+const SHADE_DIM_MAX = 115;
+const SHADE_DIM_MIN_STD = 10;
+// Brightest channel a pixel under the 0.15 wipe can reach (38 + 14.5), plus
+// rounding slack. Shaded sectors measure at most one stray pixel above it (the
+// wipe's antialiased edge, JPEG-ish capture noise), so a ray counts as lit only
+// when several of its pixels clear it.
+const SHADE_WIPE_LIT = 64;
+const SHADE_LIT_PIXELS = 3;
+const SHADE_EDGE_SLACK = 3; // px either side of the 12 o'clock edge to ignore
+const SHADE_RAY_STEP = 4; // degrees between sampled rays
+const SHADE_MIN_WIPE = 24; // degrees: a shorter shaded run is just dark art
+
+/**
+ * Which overlay, if any, darkens this bench icon.
+ * @returns {{alpha:number, theta:number}|null} theta = where the shade starts,
+ *   degrees clockwise from 12 o'clock (0 = the whole icon)
+ */
+function detectShade(buf, W, H, slot) {
+  const s = slot.size || 52;
+  const half = Math.floor(s / 2) - 4; // inside the cell border
+  const cx = Math.round(slot.cx),
+    cy = Math.round(slot.cy);
+  if (cx - half < 0 || cy - half < 0 || cx + half >= W || cy + half >= H)
+    return null;
+  let max = 0,
+    sum = 0,
+    sum2 = 0,
+    n = 0;
+  for (let y = cy - half; y < cy + half; y++)
+    for (let x = cx - half; x < cx + half; x++) {
+      const i = (y * W + x) * 4;
+      max = Math.max(max, buf[i], buf[i + 1], buf[i + 2]);
+      const L = pxLum(buf, W, x, y);
+      sum += L;
+      sum2 += L * L;
+      n++;
+    }
+  const std = Math.sqrt(Math.max(0, sum2 / n - (sum / n) ** 2));
+  if (std < SHADE_DIM_MIN_STD) return null; // an empty panel, or nothing
+  if (max <= SHADE_DIM_MAX) return { alpha: SHADE_DIM_ALPHA, theta: 0 };
+
+  // Clock wipe: every ray in the shaded sector stays under the wipe's ceiling.
+  // Walk back from 12 o'clock (360) anticlockwise while the rays stay dark.
+  // The slot centre can sit a pixel or two off the wipe's real apex, so the
+  // rays skip the apex itself and the band along the 12 o'clock edge — the
+  // last rays of the walk hug that edge and would otherwise read its lit side.
+  const rayLit = (deg) => {
+    const t = (deg * Math.PI) / 180;
+    const sx = Math.sin(t),
+      sy = -Math.cos(t);
+    let lit = 0;
+    for (let r = 6; r <= half; r++) {
+      const dx = Math.round(sx * r),
+        dy = Math.round(sy * r);
+      if (dy < 0 && Math.abs(dx) <= SHADE_EDGE_SLACK) continue;
+      const i = ((cy + dy) * W + (cx + dx)) * 4;
+      if (Math.max(buf[i], buf[i + 1], buf[i + 2]) > SHADE_WIPE_LIT) lit++;
+    }
+    return lit >= SHADE_LIT_PIXELS;
+  };
+  let theta = 360;
+  while (theta - SHADE_RAY_STEP > 0 && !rayLit(theta - SHADE_RAY_STEP))
+    theta -= SHADE_RAY_STEP;
+  // Too short a run is dark art.
+  if (360 - theta < SHADE_MIN_WIPE) return null;
+  // Dark all the way round: the cooldown has only just started and the lit
+  // sector is a sliver inside the 12 o'clock band. Shade everything —
+  // unshadePatch leaves the sliver's pixels alone, they are too bright.
+  if (theta <= SHADE_RAY_STEP) return { alpha: SHADE_WIPE_ALPHA, theta: 0 };
+  // The edge sits somewhere in the last lit step; split the difference.
+  return { alpha: SHADE_WIPE_ALPHA, theta: theta - SHADE_RAY_STEP / 2 };
+}
+
+/**
+ * A copy of the frame around `slot` with the shade inverted, as a small frame
+ * of its own: {buf, W, H, ox, oy} (ox/oy = the patch's origin in the frame).
+ * `reach` = how far past the slot centre the matcher's crops can go.
+ */
+function unshadePatch(buf, W, H, slot, shade, reach) {
+  const ox = Math.max(0, Math.floor(slot.cx - reach)),
+    oy = Math.max(0, Math.floor(slot.cy - reach));
+  const pw = Math.min(W, Math.ceil(slot.cx + reach)) - ox,
+    ph = Math.min(H, Math.ceil(slot.cy + reach)) - oy;
+  const out = new Uint8ClampedArray(pw * ph * 4);
+  const half = (slot.size || 52) / 2;
+  const a = shade.alpha;
+  const t0 = (shade.theta * Math.PI) / 180;
+  const ceiling = a === SHADE_WIPE_ALPHA ? SHADE_WIPE_LIT : SHADE_DIM_MAX;
+  for (let y = 0; y < ph; y++)
+    for (let x = 0; x < pw; x++) {
+      const si = ((y + oy) * W + (x + ox)) * 4,
+        di = (y * pw + x) * 4;
+      const dx = x + ox - slot.cx,
+        dy = y + oy - slot.cy;
+      // A pixel brighter than the overlay allows was never under it — the
+      // guard that keeps a slightly misplaced wipe edge from blowing the lit
+      // side's pixels out to white.
+      let shaded =
+        Math.abs(dx) <= half &&
+        Math.abs(dy) <= half &&
+        Math.max(buf[si], buf[si + 1], buf[si + 2]) <= ceiling;
+      if (shaded && shade.theta > 0) {
+        // clockwise angle from 12 o'clock, in [0, 2π)
+        let t = Math.atan2(dx, -dy);
+        if (t < 0) t += 2 * Math.PI;
+        shaded = t >= t0;
+      }
+      for (let c = 0; c < 3; c++)
+        out[di + c] = shaded
+          ? (buf[si + c] - (1 - a) * SHADE_RGB[c]) / a
+          : buf[si + c];
+      out[di + 3] = 255;
+    }
+  return { buf: out, W: pw, H: ph, ox, oy };
+}
+
 function matchSlot(buf, W, H, slot, iconHashById, opts) {
+  // A shaded icon is matched twice, as captured and with the overlay undone,
+  // and the better view wins. See detectShade.
+  const shade = !(opts && opts.noShade) && detectShade(buf, W, H, slot);
+  const raw = matchSlotView(buf, W, H, slot, iconHashById, opts);
+  if (!shade || !raw) return raw;
+  const s = slot.size || 52;
+  const tc = (opts && opts.tightConfig) || TIGHT_SLOT;
+  const off = opts && opts.tight ? tc.off : Math.max(6, Math.round(s * 0.22));
+  const p = unshadePatch(buf, W, H, slot, shade, s / 2 + off + 10);
+  const local = { ...slot, cx: slot.cx - p.ox, cy: slot.cy - p.oy };
+  const fixed = matchSlotView(p.buf, p.W, p.H, local, iconHashById, opts);
+  if (!fixed || fixed.score >= raw.score) return raw;
+  if (fixed.pos) {
+    fixed.pos.x0 += p.ox;
+    fixed.pos.y0 += p.oy;
+  }
+  fixed.shade = shade;
+  return fixed;
+}
+
+function matchSlotView(buf, W, H, slot, iconHashById, opts) {
   // Keep the best score seen per champion id across the whole local search, so we
   // can return not just the winner but the runner-up champions (best.alts). The
   // live consensus uses those runners-up as the "alternatives" for an uncertain
@@ -607,6 +770,8 @@ function classifyMatch(m) {
   // for — and rejecting it by margin would drop a champion that is really there.
   // Catching a misaligned rect is the locate stage's job (aramBenchEvidence),
   // not this function's.
+  // A flat panel is empty whatever its colour happens to resemble.
+  if (m.fill != null && m.fill < SCAN_EMPTY_FILL) return "reject";
   const margin = m.margin == null ? Infinity : m.margin;
   if (
     m.color <= SCAN_ACCEPT_COLOR &&
@@ -883,6 +1048,7 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   const best = { ...ranked[0], alts: ranked.slice(0, 4) };
   // How far the winner pulled away from the next champion. See SCAN_MIN_MARGIN.
   best.margin = runnerUpMargin(ranked);
+  best.fill = discStd(buf, W, H, circle.cx, circle.cy, CIRCLE_FILL_R * s);
   if (win) {
     best.pos = { x0: win.x0, y0: win.y0, size: win.size };
     if (opts && opts.debug) {
@@ -893,10 +1059,38 @@ function matchCircle(buf, W, H, circle, iconHashById, opts) {
   return best;
 }
 
-// Team circles are always real champions (a full ARAM team is 5), so there is no
-// "empty" case — only accept vs uncertain (flagged) vs reject (detection junk).
+// A team circle is empty while that player is still picking: a flat dark disc
+// inside the (often animated) gold ring. Occupancy is measured on a disc well
+// inside the ring, because the square crop's corners reach the ring itself and
+// read an empty circle as filled. Measured over every labelled circle (275):
+// empty 0.3-0.4, filled 16.8-79.1 on a disc of r = 0.45 * crop size.
+const CIRCLE_FILL_R = 0.42; // disc radius as a fraction of the circle crop size
+const CIRCLE_EMPTY_FILL = 8; // luminance std below this = nobody picked yet
+
+/** Luminance std over the disc of radius r around (cx, cy). */
+function discStd(buf, W, H, cx, cy, r) {
+  let n = 0,
+    s = 0,
+    s2 = 0;
+  for (let y = Math.ceil(cy - r); y <= cy + r; y++) {
+    if (y < 0 || y >= H) continue;
+    for (let x = Math.ceil(cx - r); x <= cx + r; x++) {
+      if (x < 0 || x >= W || (x - cx) ** 2 + (y - cy) ** 2 > r * r) continue;
+      const L = pxLum(buf, W, x, y);
+      s += L;
+      s2 += L * L;
+      n++;
+    }
+  }
+  if (!n) return 0;
+  const m = s / n;
+  return Math.sqrt(Math.max(0, s2 / n - m * m));
+}
+
+// accept vs uncertain (flagged) vs reject (nobody picked yet, or detection junk).
 function classifyCircleMatch(m) {
   if (!m) return "reject";
+  if (m.fill != null && m.fill < CIRCLE_EMPTY_FILL) return "reject";
   // Circles benefit from this more than the bench does: their distance
   // thresholds are the loosest in the pipeline (CIRCLE_MAYBE admits a combined
   // score of 42, while two DIFFERENT champions sit only 33.6 apart at the
@@ -1704,6 +1898,8 @@ const SCAN_CORE = {
   circleRegionFromClientRect,
   benchFromClientRect,
   matchSlot,
+  detectShade,
+  CIRCLE_EMPTY_FILL,
   classifyMatch,
   detectTeamCircles,
   detectTeamCirclesIn,

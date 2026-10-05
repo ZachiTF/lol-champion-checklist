@@ -533,22 +533,13 @@ function spotMargins(frame, spots, iconHashById, circle, quick) {
           iconHashById,
           opts,
         );
-    // An empty panel is near-uniform and carries no identity evidence either
-    // way, so it neither helps nor hurts. matchCircle reports no fill, so a
-    // circle's occupancy is measured directly.
-    // matchCircle reports no occupancy, so measure the circle's directly.
-    const fill =
-      m && m.fill != null
-        ? m.fill
-        : ARAM_CORE.fillStd(
-            frame.buf,
-            frame.W,
-            frame.H,
-            spot.cx,
-            spot.cy,
-            Math.round(spot.size),
-          );
-    if (!m || !(fill >= ARAM_CORE.VERIFY_EMPTY_FILL)) continue;
+    // An empty panel — or a circle whose player is still picking — is
+    // near-uniform and carries no identity evidence either way, so it neither
+    // helps nor hurts.
+    const empty = circle
+      ? ARAM_CORE.CIRCLE_EMPTY_FILL
+      : ARAM_CORE.VERIFY_EMPTY_FILL;
+    if (!m || !(m.fill >= empty)) continue;
     const alt = (m.alts || []).find((a) => a.id !== m.id);
     margins.push(alt ? alt.score - m.score : 0);
   }
