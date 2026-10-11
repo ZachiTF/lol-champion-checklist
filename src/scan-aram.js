@@ -728,7 +728,7 @@ function locateAramClient(frame, ctx) {
     return accept(first);
   // The rescue below re-seeds the whole scale range, which costs ~10x the cheap
   // path. A live loop polling for champion select several times a second asks
-  // for it only occasionally (see LIVE_RESCUE_EVERY in scan-ui.js); a one-off
+  // for it only occasionally (see LIVE_RESCUE_EVERY in scan-live.js); a one-off
   // scan of a still image always wants it.
   if (c.rescue === false) return accept(first);
 

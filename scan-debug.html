@@ -1435,7 +1435,7 @@
         const octx = overlay.getContext("2d");
         octx.drawImage(canvas, 0, 0);
         octx.lineWidth = 2;
-        // Same rule as the app's live overlay (scan-ui paintLivePreview): the SOLID
+        // Same rule as the app's live overlay (scan-live paintLivePreview): the SOLID
         // box is the nominal grid cell (tiles cleanly on the pitch); the DASHED box
         // is the matcher's winning crop (m.pos), drawn only when it drifted off the
         // cell — so drift reads as information, not a box straddling its neighbour.
