@@ -311,6 +311,7 @@
          functions become globals we can call directly. -->
     <script src="src/scan-core.js"></script>
     <script src="src/scan-aram.js"></script>
+    <script src="src/scan-grids.js"></script>
     <script src="src/zip-store.js"></script>
     <script>
       const LANG = "en_US";
@@ -581,7 +582,7 @@
         return c;
       }
 
-      // Stage G — the generic, identity-free grid detector (scan-core detectGrids).
+      // Stage G — the generic, identity-free grid detector (scan-grids.js detectGrids).
       // Runs on ANY frame (independent of the ARAM pipeline), so it also visualizes
       // champion grids on non-champ-select screens (e.g. the challenge modal).
       function renderGridStage(srcCanvas, buf, W, H) {

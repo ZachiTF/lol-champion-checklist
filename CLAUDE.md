@@ -42,7 +42,8 @@ review bar shows ✓ saved); `⤒ Import .zip` loads an export back in to label 
 
 **Traps that already cost a session each:**
 
-- `scan-debug.html`'s "generic grid detector" (detectGrids) is NOT the reader;
+- `scan-debug.html`'s "generic grid detector" (detectGrids, `src/scan-grids.js`,
+  loaded by the debug page only) is NOT the reader;
   nothing consumes it and its boxes land on unrelated UI. It is collapsed at the
   bottom for that reason. The reader's boxes are the ones in the label step.
 - Browser ≠ Node. In a classic script a top-level `const` is not on
