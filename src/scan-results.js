@@ -41,6 +41,8 @@ function renderScanResults() {
     host.appendChild(pinned); // always after the panel
   }
   pinned.innerHTML = "";
+  // Last game's read, kept on screen while the next lobby is being read.
+  pinned.classList.toggle("stale", !!scanState.stale);
 
   const byId = new Map(champions.map((c) => [c.id, c]));
 

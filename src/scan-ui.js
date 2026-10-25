@@ -459,8 +459,8 @@ function ensureScanPanel() {
     `<button class="scan-panel-close" title="Hide scanner">×</button>` +
     `</div>` +
     `<p class="scan-panel-hint">Read live from your screen (no install — share the ` +
-    `League window once and it reads champion select automatically, then stops ` +
-    `sharing when the game starts), or paste a screenshot with ` +
+    `League window once and it reads every champion select automatically, game ` +
+    `after game), or paste a screenshot with ` +
     `<kbd>Ctrl</kbd>+<kbd>V</kbd>, drop an image, or choose a file.</p>` +
     `<div class="scan-live"></div>` +
     `<div class="scan-sources"></div>` +
@@ -492,6 +492,7 @@ function ensureScanPanel() {
   });
 
   renderLiveControls(false);
+  syncLiveLaunch();
   return panel;
 }
 
@@ -545,7 +546,26 @@ function closeScanPanel() {
   stopLiveCapture();
   scanStepStates = null;
   scanPanelEl()?.remove();
+  syncLiveLaunch();
 }
+
+// The always-visible "read live" button above the results: live reading is the
+// scanner's main use, so it shouldn't sit behind settings → 📷 → panel. One click
+// opens the panel AND asks for the share — startLiveCapture's getDisplayMedia
+// runs inside this click, which is the user gesture the browser requires. Hidden
+// while the panel is open (the panel has its own controls).
+function syncLiveLaunch() {
+  const btn = document.getElementById("live-launch");
+  if (btn) btn.hidden = !!scanPanelEl();
+}
+(function initLiveLaunch() {
+  const btn = document.getElementById("live-launch");
+  if (!btn) return;
+  btn.onclick = () => {
+    openScanPanel();
+    if (!liveIsSharing()) startLiveCapture();
+  };
+})();
 
 // Back-compat aliases: the settings 📷 button and older callers used these names.
 function openScanOverlay() {

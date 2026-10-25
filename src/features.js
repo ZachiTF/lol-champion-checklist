@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 8;
+const FEATURES_VERSION = 9;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -78,7 +78,7 @@ const FEATURE_LIST = [
   {
     icon: "📹",
     title: "Live screen reading",
-    desc: "Share the League window once and it reads champion select automatically as picks lock in, then stops sharing when the game starts. Open it with 📷 in settings.",
+    desc: "Share the League window once and it reads champion select automatically as picks lock in. Start it with the 📹 button above the champions.",
     since: 4,
     sub: [
       {
@@ -148,6 +148,26 @@ const FEATURE_LIST = [
       {
         title: "Refuses look-alikes",
         desc: "a screen full of champion icons — this app's own grid, say — no longer reads as a champion-select bench.",
+      },
+    ],
+  },
+  {
+    icon: "🔁",
+    title: "Live reading, one click, all session",
+    desc: "A 📹 button above the champions starts live reading straight away — no trip through settings. And one share now lasts the whole session: during a game it stands by (barely any CPU), then reads your next champion select by itself.",
+    since: 9,
+    sub: [
+      {
+        title: "Old picks step aside",
+        desc: "last game's champions stay up, dimmed, until the new lobby's read replaces them.",
+      },
+      {
+        title: "Prefer the old way?",
+        desc: "tick “Stop sharing when the game starts” under the live preview.",
+      },
+      {
+        title: "One-click resume",
+        desc: "if the share ends anyway (League closed, browser's Stop button), the button says Resume.",
       },
     ],
   },

@@ -962,7 +962,8 @@ function renderThemeSwitcher() {
   const scanBtn = document.createElement("button");
   scanBtn.className = "scan-toggle";
   scanBtn.textContent = "📷";
-  scanBtn.title = "Scan a champion-select screenshot for available champions";
+  scanBtn.title =
+    "Scan champion select — live from your screen, or from a pasted screenshot";
   scanBtn.onclick = () => {
     settingsOpen = false;
     applySettingsDrawerState();

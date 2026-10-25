@@ -1,13 +1,17 @@
 // Screenshot scan — live screen capture (getDisplayMedia): the share session,
-// the watching → reading → complete state machine, the preview canvas with its
-// focus overlay, and the live controls. All per-share state lives in the one
-// `live` object (see newLiveSession).
+// the watching → reading → complete → standby state machine, the preview canvas
+// with its focus overlay, and the live controls. All per-share state lives in the
+// one `live` object (see newLiveSession).
 
 // ---- how it behaves ----
 // Share the League window once and it auto-scans: it polls, retrying until it
 // gets a complete read (bench + all 5 picks), pins that, and then stops scanning.
-// After that it lightly watches for champion select to disappear and auto-drops
-// the screen share when the game starts — so you never share during the game.
+// After that it lightly watches for champion select to disappear. When the game
+// starts it goes to "standby": the share stays open (the browser only grants a
+// new one on a click, so dropping it meant re-sharing before every ARAM), the
+// capture drops to 1 fps, and a slow poll waits for the NEXT champion select,
+// which it then reads like the first. "Stop sharing when the game starts"
+// (LIVE_AUTOSTOP_KEY) restores the old drop-the-share behaviour.
 //
 // With no LCU, the only "game started" signal is the pixels: champ select is no
 // longer in the frame. That's reliable when you share the League WINDOW (it stays
@@ -24,7 +28,7 @@ function newLiveSession() {
     focus: null, // last read's boxes to stroke: { client, bench, circ }
     timer: null, // the single pending poll/watch timeout
     ticker: null, // 250ms interval that renders the "next check in Ns" line
-    state: "idle", // idle | watching | reading | complete
+    state: "idle", // idle | watching | reading | complete | standby
     surface: "monitor", // "window" | "monitor" | "browser" (from the track)
     // Cached champ-select client rect — reused across polls (the frame is
     // pixel-stable), so we locate once and then do fast "tight" reads. Dropped
@@ -38,6 +42,9 @@ function newLiveSession() {
     filledSlots: null, // bench slots that read as champions at the full read
     fullAt: 0, // when the full read landed (ms)
     goneSince: 0, // when champ select first went missing (ms), 0 = present
+    // Champion per filled bench slot on the first "complete" watch tick; a frame
+    // whose slots mostly read as OTHER champions is a new lobby (see liveWatchTick).
+    watchIds: null,
     nextCheckAt: 0, // when the next check is scheduled (ms) — drives the countdown
     checking: false, // true while a read is actually running (blocks the thread)
     history: [], // states we came from, most recent last: [{ state, at, why }]
@@ -85,7 +92,28 @@ function liveEnter(state) {
     live.agg = createScanAggregator();
     live.filledSlots = null;
     live.goneSince = 0;
+  } else if (state === "complete") {
+    live.watchIds = null;
+  } else if (state === "standby") {
+    // Like watching — the next lobby needs a fresh locate — but the pinned
+    // results stay up until that lobby's first read replaces them.
+    live.layout = null;
+    live.agg = null;
+    live.focus = null;
+    live.filledSlots = null;
+    live.goneSince = 0;
+    scanStepStates = null;
+    scanRenderSteps();
   }
+  liveSetFrameRate(state === "standby" ? LIVE_STANDBY_FPS : LIVE_FPS);
+  live.preview?.parentElement?.classList.toggle("standby", state === "standby");
+}
+// Best effort: a browser that ignores the constraint just keeps its rate.
+function liveSetFrameRate(fps) {
+  const track = live.stream?.getVideoTracks()[0];
+  if (!track || !track.applyConstraints) return;
+  if (track.getSettings?.().frameRate === fps) return;
+  track.applyConstraints({ frameRate: fps }).catch(() => {});
 }
 // Move forward (or anywhere), remembering where we came from.
 function liveSetState(next, why) {
@@ -106,8 +134,11 @@ function liveRelocate(why) {
 function liveGoBack(why) {
   if (!live.video || live.state === "idle") return;
   const entry = live.history.pop();
+  // Standby has no cached lobby to re-read, so its only way back is a re-find.
   const prev =
-    entry && entry.state !== "idle" && entry.state !== live.state
+    live.state === "standby"
+      ? "watching"
+      : entry && entry.state !== "idle" && entry.state !== live.state
       ? entry.state
       : LIVE_FLOW[Math.max(0, LIVE_FLOW.indexOf(live.state) - 1)];
   liveEnter(prev);
@@ -157,7 +188,17 @@ const LIVE_WATCH_MS = 3000; // cheap "still in champ select?" re-check interval
 const LIVE_RESCUE_EVERY = 5;
 const LIVE_WINDOW_GONE_MS = 8000; // window share: gone this long → game started
 const LIVE_SCREEN_GONE_MS = 15000; // screen share: gone this long (alt-tab tolerant)
-const LIVE_SCREEN_MAX_MS = 120000; // screen share: hard cap after a full read
+const LIVE_SCREEN_MAX_MS = 120000; // screen share: hard cap after a full read (autostop only)
+const LIVE_STANDBY_MS = 5000; // between-games poll for the next champion select
+const LIVE_FPS = 5; // capture rate while finding/reading champ select
+const LIVE_STANDBY_FPS = 1; // capture rate during a game
+const LIVE_AUTOSTOP_KEY = "lol_live_autostop"; // "true" = drop the share at game start
+function liveAutostop() {
+  return localStorage.getItem(LIVE_AUTOSTOP_KEY) === "true";
+}
+// Set when the browser ended the share on its own (League client closed, the
+// browser's "Stop sharing" bar), so the start button offers to resume.
+let liveEndedByBrowser = false;
 
 function stopLiveCapture() {
   if (live.timer) clearTimeout(live.timer);
@@ -196,9 +237,14 @@ async function startLiveCapture() {
     live.stream = await navigator.mediaDevices.getDisplayMedia({
       // A few fps so each fast poll (~600ms) grabs a genuinely fresh frame — the
       // consensus wants independent frames, not the same one re-read. Champ select
-      // is near-static, so this stays cheap.
-      video: { frameRate: 5 },
+      // is near-static, so this stays cheap. displaySurface opens Chrome's picker
+      // on the Window tab, where the League client is; the other hints keep this
+      // tab out of the list. Browsers that don't know them ignore them.
+      video: { frameRate: LIVE_FPS, displaySurface: "window" },
       audio: false,
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "include",
+      monitorTypeSurfaces: "include",
     });
   } catch (err) {
     scanSetStatus(
@@ -224,9 +270,14 @@ async function startLiveCapture() {
   // If the user stops sharing via the browser's own control, tear down cleanly.
   track?.addEventListener("ended", () => {
     stopLiveCapture();
+    liveEndedByBrowser = true;
     renderLiveControls(false);
-    scanSetStatus("Screen sharing stopped.");
+    scanSetStatus(
+      "Screen sharing stopped (League closed, or the browser’s Stop button). " +
+        "Resume to keep reading.",
+    );
   });
+  liveEndedByBrowser = false;
   renderLiveControls(true);
   startLiveTicker();
   runLiveAuto();
@@ -241,7 +292,8 @@ function startLiveTicker() {
   // raw video while letting us stroke the focus overlay on top of each frame.
   live.ticker = setInterval(() => {
     updateCadence();
-    paintLivePreview();
+    // During a game the preview is a dimmed still; repainting it buys nothing.
+    if (live.state !== "standby") paintLivePreview();
   }, 250);
   updateCadence();
   paintLivePreview();
@@ -366,9 +418,9 @@ async function runLiveAuto() {
 // the current best guess. Advances the state machine; finalizes only once the
 // consensus is STABLE (all 5 picks settled across several frames), never on a
 // single frame — that's what makes a transient misread unable to win.
+const LIVE_POLL_STATES = ["watching", "reading", "standby"];
 async function liveLoop() {
-  if (!live.video || (live.state !== "watching" && live.state !== "reading"))
-    return;
+  if (!live.video || !LIVE_POLL_STATES.includes(live.state)) return;
   const epoch = liveEpoch; // this poll belongs to the state we start in
   live.checking = true;
   updateCadence();
@@ -397,12 +449,18 @@ async function liveLoop() {
     if (
       !live.video ||
       epoch !== liveEpoch ||
-      (live.state !== "watching" && live.state !== "reading")
+      !LIVE_POLL_STATES.includes(live.state)
     ) {
       live.checking = false;
       return;
     }
-    if (!res.layout || (!res.ids.length && cached)) {
+    if (
+      live.state === "standby" &&
+      (!res.layout || !res.ids.length || (res.verify && !res.verify.ok))
+    ) {
+      // Still in game (or between lobbies). Stay quiet: no relocate churn, no
+      // status flicker — the slow poll below just tries again.
+    } else if (!res.layout || (!res.ids.length && cached)) {
       // Nothing here — or a cached layout that stopped reading (window moved /
       // champ select ended). Going back to watching drops the cache + consensus.
       liveRelocate("champion select isn’t in the frame");
@@ -431,6 +489,12 @@ async function liveLoop() {
       }
     } else {
       live.badStreak = 0;
+      if (live.state === "standby" && scanState.active) {
+        // Next lobby: last game's champions stay visible, dimmed, until this
+        // lobby's first read replaces them a poll or two from now.
+        scanState.stale = true;
+        renderScanResults();
+      }
       liveSetState("reading", "champion select found");
       if (res.ids.length) live.layout = res.layout; // cache a layout that reads
       // Update the live focus overlay from this frame's located area + boxes.
@@ -477,7 +541,9 @@ async function liveLoop() {
           scanSetStatus(
             `Champion select read ✓ — ${agg.ids.length} champions pinned below` +
               (nMaybe ? `, ${nMaybe} to double-check` : "") +
-              `. Waiting for the game to start, then I’ll stop sharing ${scope}.`,
+              (liveAutostop()
+                ? `. Waiting for the game to start, then I’ll stop sharing ${scope}.`
+                : `. I’ll keep watching and read your next champion select too.`),
           );
           scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
           return;
@@ -494,23 +560,40 @@ async function liveLoop() {
     }
   }
   live.checking = false;
-  scheduleNextCheck(liveLoop, LIVE_INTERVAL_MS);
+  scheduleNextCheck(
+    liveLoop,
+    live.state === "standby" ? LIVE_STANDBY_MS : LIVE_INTERVAL_MS,
+  );
 }
 
 // Cheap "is champion select still on screen?" — re-check only the bench slots
 // that were filled at the full read, instead of a full re-locate every tick.
-function liveStillPresent(buf, w, h) {
-  const slots = (live.filledSlots || []).slice(0, 6);
-  let hits = 0;
-  for (const slot of slots) {
+// Returns the champion each checked slot reads as (null = not a champion).
+function liveSlotIds(buf, w, h) {
+  return (live.filledSlots || []).slice(0, 6).map((slot) => {
     const m = matchSlot(buf, w, h, slot, iconHashes.byId, { tight: true });
-    if (m && classifyMatch(m) !== "reject") hits++;
-    if (hits >= 2) return true;
-  }
-  return false;
+    return m && classifyMatch(m) !== "reject" ? m.id : null;
+  });
+}
+// A new lobby can land in the very same spot — and a minimized League window can
+// hand us a frozen frame during the game, so "gone" never fires in between. So
+// besides "present", ask whether the slots now hold mostly OTHER champions than
+// at the start of this complete phase. (A bench swap in the same lobby can trip
+// this too; re-reading then is right anyway.)
+function liveLobbyChanged(ids) {
+  if (!live.watchIds) return false;
+  let seen = 0,
+    changed = 0;
+  ids.forEach((id, i) => {
+    if (!id || !live.watchIds[i]) return;
+    seen++;
+    if (id !== live.watchIds[i]) changed++;
+  });
+  return seen >= 2 && changed * 2 > seen;
 }
 
-// After a full read: watch for champion select to vanish, then drop the share.
+// After a full read: watch for champion select to vanish, then go to standby
+// (or, with autostop on, drop the share).
 async function liveWatchTick() {
   if (!live.video || live.state !== "complete") return;
   const epoch = liveEpoch;
@@ -519,19 +602,32 @@ async function liveWatchTick() {
   await nextPaint();
   if (!live.video || epoch !== liveEpoch || live.state !== "complete") return;
   const frame = grabLiveFrame();
-  const present = frame ? liveStillPresent(frame.buf, frame.w, frame.h) : false;
+  const ids = frame ? liveSlotIds(frame.buf, frame.w, frame.h) : [];
+  const present = ids.filter(Boolean).length >= 2;
+  if (present && !live.watchIds) live.watchIds = ids;
+  if (present && liveLobbyChanged(ids)) {
+    live.checking = false;
+    liveSetState("reading", "champion select changed");
+    scanSetStatus("Champion select changed — reading it again…");
+    scheduleNextCheck(liveLoop, 150);
+    return;
+  }
   const now = Date.now();
   if (present) live.goneSince = 0;
   else if (!live.goneSince) live.goneSince = now;
 
   const goneFor = live.goneSince ? now - live.goneSince : 0;
   const elapsed = now - live.fullAt;
-  const stop =
+  const autostop = liveAutostop();
+  // Standing by is cheap to get wrong (it just re-reads when champ select is
+  // back), so only the autostop path needs the screen share's hard cap.
+  const gone =
     live.surface === "window"
       ? goneFor >= LIVE_WINDOW_GONE_MS
-      : goneFor >= LIVE_SCREEN_GONE_MS || elapsed >= LIVE_SCREEN_MAX_MS;
+      : goneFor >= LIVE_SCREEN_GONE_MS ||
+        (autostop && elapsed >= LIVE_SCREEN_MAX_MS);
 
-  if (stop) {
+  if (gone && autostop) {
     const scope =
       live.surface === "window" ? "the League window" : "your screen";
     stopLiveCapture();
@@ -542,6 +638,15 @@ async function liveWatchTick() {
     return;
   }
   live.checking = false;
+  if (gone) {
+    liveSetState("standby", "game started");
+    scanSetStatus(
+      "Game in progress — standing by. Your next champion select will be read automatically.",
+    );
+    paintLivePreview(); // one clean still for the dimmed preview
+    scheduleNextCheck(liveLoop, LIVE_STANDBY_MS);
+    return;
+  }
   scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
 }
 
@@ -590,11 +695,24 @@ function renderLiveControls(active) {
     row.appendChild(back);
     row.appendChild(stop);
     wrap.appendChild(row);
+    // Off by default: one share lasting the whole session is the point.
+    const autostop = document.createElement("label");
+    autostop.className = "scan-live-autostop";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = liveAutostop();
+    box.onchange = () =>
+      localStorage.setItem(LIVE_AUTOSTOP_KEY, String(box.checked));
+    autostop.appendChild(box);
+    autostop.append(" Stop sharing when the game starts");
+    wrap.appendChild(autostop);
     updateCadence();
   } else {
     const start = document.createElement("button");
     start.className = "scan-live-start";
-    start.textContent = "📹 Read live from your screen";
+    start.textContent = liveEndedByBrowser
+      ? "📹 Resume live reading"
+      : "📹 Read live from your screen";
     start.onclick = startLiveCapture;
     wrap.appendChild(start);
   }
