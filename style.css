@@ -1593,6 +1593,23 @@ body.summoner-search-hidden .wip-notice {
   opacity: 1;
 }
 
+.scan-live-log {
+  margin-top: 8px;
+}
+.scan-live-log pre {
+  max-height: 160px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  font-size: 0.85em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  user-select: all;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+}
+
 /* Minimised while sharing: one status line, full width, results below it. */
 .scan-panel.collapsed {
   display: flex;

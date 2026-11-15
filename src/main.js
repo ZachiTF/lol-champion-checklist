@@ -64,6 +64,7 @@ fetch("https://ddragon.leagueoflegends.com/api/versions.json")
 
     saveState();
     renderAll();
+    prewarmScanner();
   })
   .catch((err) => {
     progressText.textContent = "Failed to load champion data.";

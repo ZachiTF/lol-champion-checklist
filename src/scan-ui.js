@@ -79,8 +79,19 @@ function loadCrossOriginImage(url) {
 // through the folder's aliases before the read is used.
 const ICON_HASH_VERSION = 3; // bump when the stored hash set changes (v3: drops caches built while the Classic duplicates counted as champions)
 
-async function ensureIconHashes(onProgress) {
-  if (iconHashes && iconHashes.patch === PATCH) return iconHashes;
+// One build at a time: the page-load warm-up (prewarmScanner) and a click on the
+// scanner can ask at the same moment, and two builds would fetch every icon twice.
+let iconHashBuild = null;
+function ensureIconHashes(onProgress) {
+  if (iconHashes && iconHashes.patch === PATCH)
+    return Promise.resolve(iconHashes);
+  if (!iconHashBuild)
+    iconHashBuild = buildIconHashes(onProgress).finally(() => {
+      iconHashBuild = null;
+    });
+  return iconHashBuild;
+}
+async function buildIconHashes(onProgress) {
   try {
     const raw = JSON.parse(localStorage.getItem(ICON_HASH_STORE) || "null");
     if (
@@ -492,6 +503,7 @@ function ensureScanPanel() {
   let panel = host.querySelector(".scan-panel");
   if (panel) return panel;
   scanPanelOpen = true;
+  localStorage.setItem(SCAN_USED_KEY, "true");
   panel = document.createElement("div");
   panel.className = "scan-panel";
   panel.innerHTML =
@@ -531,6 +543,21 @@ function ensureScanPanel() {
   syncLiveLaunch();
   renderScanResults(); // the results column's empty state depends on the panel
   return panel;
+}
+// Get the scanner ready while the page is idle, so a click on 📹 goes straight to
+// reading: the icon hashes (a parse of the cache, or ~170 icon fetches once per
+// patch) and the worker. Only for people who have opened the scanner before —
+// everyone else shouldn't pay for those downloads. Called once champion data is
+// in (main.js).
+const SCAN_USED_KEY = "lol_scan_used";
+function prewarmScanner() {
+  if (localStorage.getItem(SCAN_USED_KEY) !== "true") return;
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 300));
+  idle(() => {
+    ensureIconHashes()
+      .then((h) => h && h.byId.size && ensureScanWorker())
+      .catch(() => {});
+  });
 }
 // The "choose a file" link in the results column's empty state.
 function scanChooseFile() {
@@ -608,7 +635,7 @@ function openScanPanel() {
 }
 function closeScanPanel() {
   scanPanelOpen = false;
-  stopLiveCapture();
+  stopLiveCapture("scanner closed");
   scanStepStates = null;
   scanPanelEl()?.remove();
   syncLiveLaunch();

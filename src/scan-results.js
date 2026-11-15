@@ -165,8 +165,9 @@ function scanEmptyState() {
   const hint = document.createElement("div");
   hint.className = "scan-empty-hint";
   hint.innerHTML =
-    `Read live — share the League window once and every champion select is ` +
-    `read automatically, game after game. Or paste a screenshot with ` +
+    `Start live reading before you queue: share the League window once and ` +
+    `it waits, then reads every champion select by itself, game after game. ` +
+    `Or paste a screenshot with ` +
     `<kbd>Ctrl</kbd>+<kbd>V</kbd>, drop an image here, or `;
   const pick = document.createElement("button");
   pick.className = "scan-link";

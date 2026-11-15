@@ -54,6 +54,34 @@ function newLiveSession() {
 }
 let live = newLiveSession();
 
+// ---- share log --------------------------------------------------------------
+// What happened to the share, in order, kept across reloads: when a share dies
+// mid-session (it does, on some browsers, when the game starts) this is the
+// only evidence of WHO ended it — the browser's track, the client's window, or
+// our own state machine. Shown under Options in the panel.
+const LIVE_LOG_KEY = "lol_live_log";
+const LIVE_LOG_MAX = 80;
+function liveLogLines() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LIVE_LOG_KEY) || "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    return [];
+  }
+}
+function liveLog(msg) {
+  const lines = liveLogLines();
+  lines.push(`${new Date().toTimeString().slice(0, 8)} ${msg}`);
+  try {
+    localStorage.setItem(
+      LIVE_LOG_KEY,
+      JSON.stringify(lines.slice(-LIVE_LOG_MAX)),
+    );
+  } catch (_) {}
+  const pre = scanPanelEl()?.querySelector(".scan-live-log pre");
+  if (pre) pre.textContent = lines.slice(-LIVE_LOG_MAX).join("\n");
+}
+
 // ---- the live state machine ------------------------------------------------
 // watching → reading → complete, plus an explicit way BACK. Going back is how the
 // scanner recovers when it locked onto the wrong thing: re-entering an earlier
@@ -113,11 +141,14 @@ function liveSetFrameRate(fps) {
   const track = live.stream?.getVideoTracks()[0];
   if (!track || !track.applyConstraints) return;
   if (track.getSettings?.().frameRate === fps) return;
-  track.applyConstraints({ frameRate: fps }).catch(() => {});
+  track
+    .applyConstraints({ frameRate: fps })
+    .catch((err) => liveLog(`frameRate ${fps} refused: ${err && err.name}`));
 }
 // Move forward (or anywhere), remembering where we came from.
 function liveSetState(next, why) {
   if (live.state === next) return;
+  liveLog(`${live.state} → ${next}${why ? ` (${why})` : ""}`);
   live.history.push({ state: live.state, at: Date.now(), why });
   if (live.history.length > 8) live.history.shift();
   liveEnter(next);
@@ -200,7 +231,8 @@ function liveAutostop() {
 // browser's "Stop sharing" bar), so the start button offers to resume.
 let liveEndedByBrowser = false;
 
-function stopLiveCapture() {
+function stopLiveCapture(why) {
+  if (live.video) liveLog(`share stopped by the app: ${why || "unspecified"}`);
   if (live.timer) clearTimeout(live.timer);
   if (live.ticker) clearInterval(live.ticker);
   if (live.stream) live.stream.getTracks().forEach((t) => t.stop());
@@ -247,6 +279,7 @@ async function startLiveCapture() {
       monitorTypeSurfaces: "include",
     });
   } catch (err) {
+    liveLog(`share not started: ${err && err.name}`);
     scanSetStatus(
       err && err.name === "NotAllowedError"
         ? "Screen share was cancelled."
@@ -267,9 +300,21 @@ async function startLiveCapture() {
   await video.play().catch(() => {});
   live.video = video;
   lastScanImage = null; // live frames take over from any pasted screenshot
+  const set = (track && track.getSettings && track.getSettings()) || {};
+  liveLog(
+    `share started: surface=${set.displaySurface || "unreported"} ` +
+      `${video.videoWidth}x${video.videoHeight} "${track ? track.label : ""}"`,
+  );
+  // Muted = the browser has no frames to give (a hidden or minimised window on
+  // some platforms); the share is still alive and may come back by itself.
+  track?.addEventListener("mute", () =>
+    liveLog(`track muted in state ${live.state}`),
+  );
+  track?.addEventListener("unmute", () => liveLog("track unmuted"));
   // If the user stops sharing via the browser's own control, tear down cleanly.
   track?.addEventListener("ended", () => {
-    stopLiveCapture();
+    liveLog(`track ended by the browser in state ${live.state}`);
+    stopLiveCapture("the browser ended the track");
     liveEndedByBrowser = true;
     renderLiveControls(false);
     scanSetStatus(
@@ -631,7 +676,7 @@ async function liveWatchTick() {
   if (gone && autostop) {
     const scope =
       live.surface === "window" ? "the League window" : "your screen";
-    stopLiveCapture();
+    stopLiveCapture("autostop: game started");
     renderLiveControls(false);
     scanSetStatus(
       `Game started — stopped sharing ${scope}. Your champions are still pinned.`,
@@ -674,6 +719,16 @@ function renderLiveControls(active) {
   autostop.appendChild(box);
   autostop.append(" Stop sharing when the game starts");
   opts.appendChild(autostop);
+  // The share log (see liveLog): what to send along when a share dies mid-session.
+  const log = document.createElement("details");
+  log.className = "scan-live-log";
+  const logHead = document.createElement("summary");
+  logHead.textContent = "Share log (for bug reports)";
+  const logBody = document.createElement("pre");
+  logBody.textContent = liveLogLines().join("\n");
+  log.appendChild(logHead);
+  log.appendChild(logBody);
+  opts.appendChild(log);
   if (active && live.video) {
     // The <video> is only a frame source now; the canvas is the visible preview
     // (so we can stroke the focus overlay on top with exact pixel alignment).
@@ -702,7 +757,7 @@ function renderLiveControls(active) {
     stop.className = "scan-action";
     stop.textContent = "Stop sharing";
     stop.onclick = () => {
-      stopLiveCapture();
+      stopLiveCapture("Stop sharing pressed");
       renderLiveControls(false);
       scanSetStatus("Screen sharing stopped.");
     };
