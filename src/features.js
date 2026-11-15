@@ -7,7 +7,7 @@
 // │ entry with `since: FEATURES_VERSION + 1`, then bump FEATURES_VERSION.     │
 // │ That surfaces the "new" dot for anyone who last opened an older version.  │
 // └─────────────────────────────────────────────────────────────────────────┘
-const FEATURES_VERSION = 9;
+const FEATURES_VERSION = 10;
 const FEATURES_SEEN_KEY = "lol_features_seen";
 
 // Short "how to use" steps for someone opening the app for the first time.
@@ -163,11 +163,27 @@ const FEATURE_LIST = [
       },
       {
         title: "Prefer the old way?",
-        desc: "tick “Stop sharing when the game starts” under the live preview.",
+        desc: "tick “Stop sharing when the game starts” under Options in the scanner.",
       },
       {
         title: "One-click resume",
         desc: "if the share ends anyway (League closed, browser's Stop button), the button says Resume.",
+      },
+    ],
+  },
+  {
+    icon: "🪟",
+    title: "Scanner beside the champions it found",
+    desc: "The scanner is now a narrow panel with “Available now” right next to it, so the live preview and the champions you tick fit on one screen. The page header and progress bar take less room too.",
+    since: 10,
+    sub: [
+      {
+        title: "Minimise while sharing",
+        desc: "▾ shrinks the scanner to a one-line status bar. It keeps sharing and reading; × still closes it and stops the share.",
+      },
+      {
+        title: "Wrong read?",
+        desc: "the reader switch and “Stop sharing when the game starts” moved under Options in the scanner — it opens by itself when a screenshot can't be read.",
       },
     ],
   },

@@ -318,6 +318,7 @@ const LIVE_PREVIEW_MAX_W = 900;
 function paintLivePreview() {
   const cv = live.preview;
   if (!cv || !live.video || !live.video.videoWidth) return;
+  if (scanIsCollapsed()) return; // minimised: nobody is looking at it
   const fw = live.video.videoWidth,
     fh = live.video.videoHeight;
   const sc = Math.min(1, LIVE_PREVIEW_MAX_W / fw); // frame px → canvas px
@@ -539,7 +540,7 @@ async function liveLoop() {
             live.surface === "window" ? "the League window" : "your screen";
           const nMaybe = agg.uncertain.size;
           scanSetStatus(
-            `Champion select read ✓ — ${agg.ids.length} champions pinned below` +
+            `Champion select read ✓ — ${agg.ids.length} champions pinned` +
               (nMaybe ? `, ${nMaybe} to double-check` : "") +
               (liveAutostop()
                 ? `. Waiting for the game to start, then I’ll stop sharing ${scope}.`
@@ -633,7 +634,7 @@ async function liveWatchTick() {
     stopLiveCapture();
     renderLiveControls(false);
     scanSetStatus(
-      `Game started — stopped sharing ${scope}. Your champions are still pinned below.`,
+      `Game started — stopped sharing ${scope}. Your champions are still pinned.`,
     );
     return;
   }
@@ -650,11 +651,29 @@ async function liveWatchTick() {
   scheduleNextCheck(liveWatchTick, LIVE_WATCH_MS);
 }
 
-// (Re)build the live-capture controls inside the panel's .scan-live slot.
+// (Re)build the live-capture controls: the preview (or the start button) in the
+// panel's .scan-live slot, the buttons in .scan-actions, and the share's one
+// setting under Options.
 function renderLiveControls(active) {
-  const wrap = scanPanelEl()?.querySelector(".scan-live");
+  const panel = scanPanelEl();
+  const wrap = panel?.querySelector(".scan-live");
   if (!wrap) return;
+  const actions = panel.querySelector(".scan-actions");
   wrap.innerHTML = "";
+  actions.innerHTML = "";
+  // Off by default: one share lasting the whole session is the point.
+  const opts = panel.querySelector(".scan-options-live");
+  opts.innerHTML = "";
+  const autostop = document.createElement("label");
+  autostop.className = "scan-live-autostop";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = liveAutostop();
+  box.onchange = () =>
+    localStorage.setItem(LIVE_AUTOSTOP_KEY, String(box.checked));
+  autostop.appendChild(box);
+  autostop.append(" Stop sharing when the game starts");
+  opts.appendChild(autostop);
   if (active && live.video) {
     // The <video> is only a frame source now; the canvas is the visible preview
     // (so we can stroke the focus overlay on top with exact pixel alignment).
@@ -668,10 +687,8 @@ function renderLiveControls(active) {
     live.preview = preview;
     wrap.appendChild(stage);
     paintLivePreview();
-    // Cadence line where the old "Scan now" button was: shows when the next
-    // automatic check runs, so it's clear the scanner is working on its own.
-    const next = document.createElement("span");
-    next.className = "scan-live-next";
+    // (The cadence line — when the next automatic check runs — is the panel's
+    // .scan-live-next, beside the steps.)
     // Manual counterpart to the automatic layout check: if you can see it read
     // the wrong thing, walk the state machine back a step. Press again to go
     // further back (re-read champion select → re-find the League window).
@@ -689,23 +706,8 @@ function renderLiveControls(active) {
       renderLiveControls(false);
       scanSetStatus("Screen sharing stopped.");
     };
-    const row = document.createElement("div");
-    row.className = "scan-live-row";
-    row.appendChild(next);
-    row.appendChild(back);
-    row.appendChild(stop);
-    wrap.appendChild(row);
-    // Off by default: one share lasting the whole session is the point.
-    const autostop = document.createElement("label");
-    autostop.className = "scan-live-autostop";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.checked = liveAutostop();
-    box.onchange = () =>
-      localStorage.setItem(LIVE_AUTOSTOP_KEY, String(box.checked));
-    autostop.appendChild(box);
-    autostop.append(" Stop sharing when the game starts");
-    wrap.appendChild(autostop);
+    actions.appendChild(back);
+    actions.appendChild(stop);
     updateCadence();
   } else {
     const start = document.createElement("button");
@@ -715,5 +717,7 @@ function renderLiveControls(active) {
       : "📹 Read live from your screen";
     start.onclick = startLiveCapture;
     wrap.appendChild(start);
+    updateCadence(); // clears the countdown left by a stopped share
   }
+  syncScanCollapsed();
 }

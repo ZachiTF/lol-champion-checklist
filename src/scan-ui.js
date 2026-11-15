@@ -159,12 +159,46 @@ async function ensureIconHashes(onProgress) {
 }
 
 // ============================================================================
-// The scan panel is docked inline inside #scan-results (above the pinned
-// "Available now" results), NOT a modal — so the controls and the results are
-// visible at the same time, and there is no full-screen overlay that closes over
-// the grid (which used to let a stray click land on a champion card underneath).
+// The scan panel is docked inline inside #scan-results, NOT a modal — so the
+// controls and the results are visible at the same time, and there is no
+// full-screen overlay that closes over the grid (which used to let a stray click
+// land on a champion card underneath). On a wide screen the panel is the narrow
+// left column and the pinned "Available now" results sit beside it (style.css,
+// .scan-results:has(.scan-panel)); on a narrow one it stacks above them.
 // ============================================================================
 let scanPanelOpen = false;
+
+// Minimised while sharing: the panel shrinks to a one-line status bar and the
+// results take the full width. The share and the reads carry on; only the
+// preview stops painting. Remembered, so it stays that way game after game.
+const SCAN_COLLAPSED_KEY = "lol_scan_collapsed";
+let scanCollapsed = localStorage.getItem(SCAN_COLLAPSED_KEY) === "true";
+// Only a running share can be minimised — an idle panel has nothing to keep
+// going, and its start button must stay reachable.
+function scanIsCollapsed() {
+  return scanCollapsed && liveIsSharing();
+}
+function syncScanCollapsed() {
+  const panel = scanPanelEl();
+  if (!panel) return;
+  const sharing = liveIsSharing();
+  const collapsed = scanIsCollapsed();
+  panel.classList.toggle("sharing", sharing);
+  panel.classList.toggle("collapsed", collapsed);
+  const btn = panel.querySelector(".scan-panel-min");
+  if (!btn) return;
+  btn.textContent = collapsed ? "▸ Show" : "▾";
+  btn.title = collapsed
+    ? "Show the live preview again"
+    : "Minimise — keeps sharing and reading";
+  btn.setAttribute("aria-expanded", String(!collapsed));
+}
+function setScanCollapsed(on) {
+  scanCollapsed = !!on;
+  localStorage.setItem(SCAN_COLLAPSED_KEY, String(scanCollapsed));
+  syncScanCollapsed();
+  if (!scanCollapsed) paintLivePreview(); // the canvas went stale while hidden
+}
 
 function scanHost() {
   return document.getElementById("scan-results");
@@ -223,10 +257,12 @@ function scanRenderSteps() {
     return;
   }
   ol.hidden = false;
+  // One row of marks; only the running (or failed) step spells out its label —
+  // the rest carry it as a tooltip.
   ol.innerHTML = scanStepStates
     .map(
       (st, i) =>
-        `<li class="scan-step scan-step-${st}">` +
+        `<li class="scan-step scan-step-${st}" title="${SCAN_STEP_LABELS[i]}">` +
         `<span class="scan-step-mark"></span>` +
         `<span class="scan-step-label">${SCAN_STEP_LABELS[i]}</span></li>`,
     )
@@ -341,6 +377,7 @@ async function runScanFromBuffer(buf, w, h) {
     scanStep(STEP_FIND, "error");
     scanSetStatus(scanNotFoundMessage(), true);
     renderReaderSwitch();
+    scanOpenOptions();
     return 0;
   }
   // One pipeline call covers both reads, so they land together.
@@ -354,6 +391,7 @@ async function runScanFromBuffer(buf, w, h) {
       true,
     );
     renderReaderSwitch();
+    scanOpenOptions();
     return 0;
   }
   scanStep(STEP_PICKS, "done");
@@ -376,11 +414,12 @@ async function runScanFromBuffer(buf, w, h) {
   // pinned, flagged, and the user can switch reader or paste a cleaner shot.
   const v = res.verify;
   scanSetStatus(
-    `Found ${n} champion${n === 1 ? "" : "s"} — pinned below ↓` +
+    `Found ${n} champion${n === 1 ? "" : "s"} — pinned under “Available now”` +
       (!v || v.ok ? "" : ` (heads up: ${v.reason} — double-check these)`),
     !!(v && !v.ok),
   );
   renderReaderSwitch();
+  if (v && !v.ok) scanOpenOptions();
   scanHost()
     ?.querySelector(".scan-pinned")
     ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -443,8 +482,10 @@ async function handleScanFile(file) {
 }
 
 // ---- the inline panel itself ----
-// Build the panel once (stable child slots: .scan-live, .scan-sources,
-// .scan-steps, .scan-status) so the live <video> and progress survive re-renders.
+// Build the panel once (stable child slots: .scan-live, .scan-progress,
+// .scan-status, .scan-actions, .scan-options) so the live <video> and progress
+// survive re-renders. How to feed it a screenshot is explained in the results
+// column's empty state (scan-results.js), not here — the panel stays short.
 function ensureScanPanel() {
   const host = scanHost();
   if (!host) return null;
@@ -455,53 +496,77 @@ function ensureScanPanel() {
   panel.className = "scan-panel";
   panel.innerHTML =
     `<div class="scan-panel-head">` +
-    `<span class="scan-panel-title">📷 Scan champion select</span>` +
-    `<button class="scan-panel-close" title="Hide scanner">×</button>` +
+    `<span class="scan-panel-title">📷 Scanner</span>` +
+    `<button class="scan-panel-min"></button>` +
+    `<button class="scan-panel-close" title="Close scanner (stops sharing)">×</button>` +
     `</div>` +
-    `<p class="scan-panel-hint">Read live from your screen (no install — share the ` +
-    `League window once and it reads every champion select automatically, game ` +
-    `after game), or paste a screenshot with ` +
-    `<kbd>Ctrl</kbd>+<kbd>V</kbd>, drop an image, or choose a file.</p>` +
     `<div class="scan-live"></div>` +
-    `<div class="scan-sources"></div>` +
+    `<div class="scan-progress">` +
     `<ol class="scan-steps" hidden></ol>` +
+    `<span class="scan-live-next"></span>` +
+    `</div>` +
     `<div class="scan-status" role="status"></div>` +
-    `<div class="scan-reader"></div>`;
-  // Insert before the pinned results so the panel is always on top.
+    `<div class="scan-actions"></div>` +
+    `<details class="scan-options">` +
+    `<summary>Not reading correctly? Options</summary>` +
+    `<div class="scan-reader"></div>` +
+    `<div class="scan-options-live"></div>` +
+    `</details>` +
+    `<input class="scan-file" type="file" accept="image/*" hidden />`;
+  // Insert before the pinned results so the panel is always first.
   host.insertBefore(panel, host.querySelector(".scan-pinned"));
 
   panel.querySelector(".scan-panel-close").onclick = closeScanPanel;
+  panel.querySelector(".scan-panel-min").onclick = () =>
+    setScanCollapsed(!scanIsCollapsed());
   renderReaderSwitch();
 
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.className = "scan-file";
-  input.onchange = () => handleScanFile(input.files[0]);
-  panel.querySelector(".scan-sources").appendChild(input);
-
-  panel.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    panel.classList.add("dragover");
-  });
-  panel.addEventListener("dragleave", () => panel.classList.remove("dragover"));
-  panel.addEventListener("drop", (e) => {
-    e.preventDefault();
-    panel.classList.remove("dragover");
-    handleScanFile(e.dataTransfer.files[0]);
-  });
+  const input = panel.querySelector(".scan-file");
+  input.onchange = () => {
+    handleScanFile(input.files[0]);
+    input.value = ""; // so choosing the same file again still fires
+  };
 
   renderLiveControls(false);
   syncLiveLaunch();
+  renderScanResults(); // the results column's empty state depends on the panel
   return panel;
 }
+// The "choose a file" link in the results column's empty state.
+function scanChooseFile() {
+  ensureScanPanel()?.querySelector(".scan-file")?.click();
+}
+// Reveal the reader switch when a read went wrong — that is when it's wanted.
+function scanOpenOptions() {
+  const d = scanPanelEl()?.querySelector(".scan-options");
+  if (d) d.open = true;
+}
+
+// Dropping an image anywhere on the scanner (panel or results) scans it.
+(function initScanDrop() {
+  const host = scanHost();
+  if (!host) return;
+  host.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    host.classList.add("dragover");
+  });
+  host.addEventListener("dragleave", (e) => {
+    if (!host.contains(e.relatedTarget)) host.classList.remove("dragover");
+  });
+  host.addEventListener("drop", (e) => {
+    e.preventDefault();
+    host.classList.remove("dragover");
+    handleScanFile(e.dataTransfer.files[0]);
+  });
+})();
 
 // ---- the reader switch ("this isn't working, try the other tool") ----------
-// Always visible in the panel, including mid-scan: if you can SEE the overlay
-// boxes landing in the wrong place, the fix is one click away rather than a
-// re-paste. Switching restarts whatever is currently running — a live capture
-// goes back to hunting for champion select with the new reader, a pasted
-// screenshot is simply read again.
+// Lives under the panel's "Options" disclosure, which is always there (including
+// mid-scan) and opens itself when a read fails: if you can SEE the overlay boxes
+// landing in the wrong place, the fix is a click away rather than a re-paste.
+// Switching restarts whatever is currently running — a live capture goes back to
+// hunting for champion select with the new reader, a pasted screenshot is simply
+// read again.
 function renderReaderSwitch() {
   const wrap = scanPanelEl()?.querySelector(".scan-reader");
   if (!wrap) return;
@@ -547,16 +612,17 @@ function closeScanPanel() {
   scanStepStates = null;
   scanPanelEl()?.remove();
   syncLiveLaunch();
+  renderScanResults(); // drops the results column's empty state
 }
 
 // The always-visible "read live" button above the results: live reading is the
 // scanner's main use, so it shouldn't sit behind settings → 📷 → panel. One click
 // opens the panel AND asks for the share — startLiveCapture's getDisplayMedia
-// runs inside this click, which is the user gesture the browser requires. Hidden
-// while the panel is open (the panel has its own controls).
+// runs inside this click, which is the user gesture the browser requires. Its
+// row is hidden while the panel is open (the panel has its own controls).
 function syncLiveLaunch() {
-  const btn = document.getElementById("live-launch");
-  if (btn) btn.hidden = !!scanPanelEl();
+  const row = document.getElementById("scan-launch");
+  if (row) row.hidden = !!scanPanelEl();
 }
 (function initLiveLaunch() {
   const btn = document.getElementById("live-launch");

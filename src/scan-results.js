@@ -31,7 +31,9 @@ function renderScanResults() {
   const host = document.getElementById("scan-results");
   if (!host) return;
   let pinned = host.querySelector(".scan-pinned");
-  if (!scanState.active || !scanState.ids.length) {
+  const empty = !scanState.active || !scanState.ids.length;
+  // Nothing read and no scanner open: the whole area goes away.
+  if (empty && !host.querySelector(".scan-panel")) {
     pinned?.remove();
     return;
   }
@@ -41,6 +43,11 @@ function renderScanResults() {
     host.appendChild(pinned); // always after the panel
   }
   pinned.innerHTML = "";
+  if (empty) {
+    pinned.classList.remove("stale");
+    pinned.appendChild(scanEmptyState());
+    return;
+  }
   // Last game's read, kept on screen while the next lobby is being read.
   pinned.classList.toggle("stale", !!scanState.stale);
 
@@ -59,8 +66,9 @@ function renderScanResults() {
   header.appendChild(title);
   header.appendChild(count);
 
+  // Only opens the panel, so style.css hides it while the panel is open.
   const rescan = document.createElement("button");
-  rescan.className = "scan-action";
+  rescan.className = "scan-action scan-rescan";
   rescan.textContent = "Scan again";
   rescan.onclick = openScanPanel;
   header.appendChild(rescan);
@@ -144,6 +152,31 @@ function renderScanResults() {
 
   pinned.appendChild(section);
   refreshScanCount();
+}
+
+// What the results column shows while the scanner is open but has read nothing
+// yet: where the champions will land, and the ways to hand it a screenshot.
+function scanEmptyState() {
+  const box = document.createElement("div");
+  box.className = "scan-section scan-empty";
+  const title = document.createElement("div");
+  title.className = "scan-empty-title";
+  title.textContent = "Champions from champion select show up here";
+  const hint = document.createElement("div");
+  hint.className = "scan-empty-hint";
+  hint.innerHTML =
+    `Read live — share the League window once and every champion select is ` +
+    `read automatically, game after game. Or paste a screenshot with ` +
+    `<kbd>Ctrl</kbd>+<kbd>V</kbd>, drop an image here, or `;
+  const pick = document.createElement("button");
+  pick.className = "scan-link";
+  pick.textContent = "choose a file";
+  pick.onclick = scanChooseFile;
+  hint.appendChild(pick);
+  hint.append(".");
+  box.appendChild(title);
+  box.appendChild(hint);
+  return box;
 }
 
 // A small icon+name chip used in the "double-check" alternatives list. `kind` is

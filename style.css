@@ -247,8 +247,8 @@ body {
 /* Header */
 .page-header {
   text-align: center;
-  padding: 36px 20px 0;
-  margin: -20px -20px 20px -20px;
+  padding: 18px 20px 0;
+  margin: -20px -20px 14px -20px;
   background: linear-gradient(
     135deg,
     rgba(var(--accent-rgb), 0.1) 0%,
@@ -270,8 +270,8 @@ body {
 }
 
 h1 {
-  margin: 0 0 28px 0;
-  font-size: 30px;
+  margin: 0 0 12px 0;
+  font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.5px;
   color: var(--fg, #e6e6e6);
@@ -283,23 +283,29 @@ h1 .highlight {
 }
 
 #progress {
-  margin: 0 0 12px 0;
-  font-size: 18px;
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
   color: rgba(var(--accent-rgb), 0.95);
-  letter-spacing: 0.5px;
-  text-align: center;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
+/* One row: the count, then the bar taking the rest. Wraps on narrow screens. */
 .progress-info {
-  max-width: 600px;
-  margin: 4px auto 24px auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  max-width: 760px;
+  margin: 0 auto 14px auto;
   padding: 0 4px;
 }
 
 .progress-bar-container {
-  width: 100%;
-  height: 14px;
+  flex: 1 1 220px;
+  height: 10px;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 7px;
   overflow: hidden;
@@ -341,7 +347,7 @@ body.animations-enabled .progress-bar {
 /* Theme Switcher */
 #theme-switcher {
   position: fixed;
-  top: 20px;
+  top: 12px;
   right: 20px;
   display: flex;
   gap: 8px;
@@ -703,9 +709,9 @@ body.summoner-search-hidden .wip-notice {
 /* Filter Bar */
 .filter-bar {
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  padding: 14px;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
   background: var(--card-bg, #151a23);
   border-radius: 8px;
   align-items: center;
@@ -866,7 +872,10 @@ body.summoner-search-hidden .wip-notice {
     gap: 8px;
     padding: 12px;
   }
+  /* flex: none — the row layout's 260px basis would become a 260px HEIGHT in
+     this column. */
   .search-bar-wrapper {
+    flex: none;
     max-width: 100%;
     width: 100%;
   }
@@ -1062,8 +1071,8 @@ body.summoner-search-hidden .wip-notice {
   display: none;
 }
 .scan-section {
-  margin-bottom: 20px;
-  padding: 16px;
+  margin-bottom: 14px;
+  padding: 12px;
   background: var(--card-bg, #151a23);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
   border-radius: 8px;
@@ -1215,10 +1224,6 @@ body.summoner-search-hidden .wip-notice {
   border-radius: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
-.scan-overlay-box.dragover {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5);
-}
 .scan-overlay-box h3 {
   margin: 0 0 10px;
   color: var(--accent);
@@ -1229,16 +1234,14 @@ body.summoner-search-hidden .wip-notice {
   line-height: 1.5;
   opacity: 0.9;
 }
-.scan-file {
-  display: block;
-  width: 100%;
-  font-size: 0.9em;
-}
 .scan-status {
-  margin-top: 14px;
-  min-height: 1.2em;
-  font-size: 0.9em;
+  margin-top: 8px;
+  font-size: 0.88em;
+  line-height: 1.4;
   opacity: 0.85;
+}
+.scan-status:empty {
+  display: none;
 }
 .scan-status.error {
   color: #e57373;
@@ -1251,8 +1254,7 @@ body.summoner-search-hidden .wip-notice {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
-  font-size: 0.82em;
+  margin-top: 8px;
 }
 .scan-reader-label {
   opacity: 0.65;
@@ -1297,12 +1299,144 @@ body.summoner-search-hidden .wip-notice {
   opacity: 1;
 }
 
-/* Live screen-capture controls inside the scan overlay. */
-.scan-live {
-  margin: 0 0 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(var(--accent-rgb), 0.2);
+/* --- Scanner dock: the panel (narrow, left) beside the results (right) --- */
+.scan-results:has(.scan-panel:not(.collapsed)) {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 14px;
 }
+.scan-results:has(.scan-panel:not(.collapsed)) .scan-panel {
+  align-self: start;
+  margin-bottom: 0;
+}
+/* The results card is at least as tall as the panel, so the pair reads as one. */
+.scan-results:has(.scan-panel:not(.collapsed)) .scan-pinned {
+  display: flex;
+}
+.scan-results:has(.scan-panel:not(.collapsed)) .scan-section {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+@media (max-width: 820px) {
+  .scan-results:has(.scan-panel:not(.collapsed)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.scan-results.dragover .scan-panel,
+.scan-results.dragover .scan-section {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5);
+}
+/* "Scan again" only opens the panel. */
+.scan-results:has(.scan-panel) .scan-rescan {
+  display: none;
+}
+.scan-results:has(.scan-panel) .scan-clear {
+  margin-left: auto;
+}
+
+/* Results column before anything is read: where champions will land, and how
+   to hand over a screenshot. Doubles as the drop target's visible face. */
+.scan-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 96px;
+  text-align: center;
+  border-style: dashed;
+}
+.scan-empty-title {
+  font-weight: 600;
+  color: var(--accent);
+}
+.scan-empty-hint {
+  max-width: 52ch;
+  font-size: 0.88em;
+  line-height: 1.5;
+  color: var(--muted-fg);
+}
+.scan-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.scan-empty-hint kbd,
+.scan-launch-hint kbd {
+  font: inherit;
+  font-size: 0.9em;
+  padding: 0 4px;
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 4px;
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+/* --- The scan panel itself --- */
+.scan-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--card-bg, #151a23);
+  color: var(--fg, #e6e6e6);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08);
+}
+.scan-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.scan-panel-title {
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.scan-panel.sharing .scan-panel-title::after {
+  content: "● Live";
+  margin-left: 8px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #57e389;
+}
+.scan-panel-min,
+.scan-panel-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1.3em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.scan-panel-min {
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+/* Only a running share can be minimised. */
+.scan-panel:not(.sharing) .scan-panel-min {
+  display: none;
+}
+.scan-panel.sharing .scan-panel-close {
+  margin-left: 0;
+}
+.scan-panel-min:hover,
+.scan-panel-close:hover {
+  opacity: 1;
+}
+
+/* Live preview (or the start button). */
 .scan-live-start {
   width: 100%;
   background: var(--accent);
@@ -1328,95 +1462,36 @@ body.summoner-search-hidden .wip-notice {
   opacity: 0;
   pointer-events: none;
 }
-/* Intrinsic size = the capture resolution; max-width/height fit it into the panel
-   while preserving aspect, so the strokes drawn in frame pixels stay aligned. */
+/* Fills the panel's column; the backing store keeps the capture's aspect, so
+   the strokes drawn in frame pixels stay aligned. */
 .scan-live-canvas {
   display: block;
-  max-width: 100%;
-  max-height: 220px;
-  margin: 0 auto;
+  width: 100%;
+  height: auto;
   background: #000;
   border-radius: 6px;
   border: 1px solid rgba(var(--accent-rgb), 0.3);
+  box-sizing: border-box;
 }
-.scan-live-row {
+
+/* One row: the four step marks, then when the next automatic check runs. */
+.scan-progress {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-top: 10px;
 }
-/* Cadence line ("Next check in 2s" / "Checking…") where the old button was. */
-.scan-live-next {
-  flex: 1;
-  font-size: 0.85em;
-  opacity: 0.75;
-  font-variant-numeric: tabular-nums;
+.scan-progress:has(.scan-steps[hidden]):has(.scan-live-next:empty) {
+  display: none;
 }
-.scan-live-row .scan-action {
-  margin-left: 0;
-}
-
-/* --- Inline scan panel (docked in #scan-results, not a modal) --- */
-.scan-panel {
-  margin-bottom: 20px;
-  padding: 16px;
-  background: var(--card-bg, #151a23);
-  color: var(--fg, #e6e6e6);
-  border: 1px solid rgba(var(--accent-rgb), 0.45);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08);
-}
-.scan-panel.dragover {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5);
-}
-.scan-panel-head {
+.scan-steps {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.scan-panel-title {
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 0.4px;
-}
-.scan-panel-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font-size: 1.3em;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.6;
-}
-.scan-panel-close:hover {
-  opacity: 1;
-}
-.scan-panel-hint {
-  margin: 0 0 14px;
-  font-size: 0.88em;
-  line-height: 1.5;
-  opacity: 0.85;
-}
-.scan-panel-hint kbd {
-  font: inherit;
-  font-size: 0.9em;
-  padding: 0 4px;
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  border-radius: 4px;
-  background: rgba(var(--accent-rgb), 0.08);
-}
-.scan-sources {
-  margin-bottom: 4px;
-}
-
-/* Stepped progress — makes it obvious the scan is doing something. */
-.scan-steps {
+  gap: 6px;
   list-style: none;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
+  min-width: 0;
 }
 .scan-steps[hidden] {
   display: none;
@@ -1424,9 +1499,8 @@ body.summoner-search-hidden .wip-notice {
 .scan-step {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 3px 0;
-  font-size: 0.9em;
+  gap: 6px;
+  font-size: 0.88em;
   opacity: 0.5;
   transition: opacity 0.2s;
 }
@@ -1434,6 +1508,15 @@ body.summoner-search-hidden .wip-notice {
 .scan-step-done,
 .scan-step-error {
   opacity: 1;
+}
+/* Only the step in play spells out its name; the others keep it as a tooltip. */
+.scan-step-label {
+  display: none;
+}
+.scan-step-active .scan-step-label,
+.scan-step-error .scan-step-label {
+  display: inline;
+  margin-right: 4px;
 }
 .scan-step-mark {
   flex: 0 0 auto;
@@ -1473,6 +1556,86 @@ body.summoner-search-hidden .wip-notice {
   to {
     transform: rotate(360deg);
   }
+}
+/* Cadence line ("Next check in 2s" / "Checking…"). */
+.scan-live-next {
+  margin-left: auto;
+  font-size: 0.82em;
+  opacity: 0.7;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.scan-actions:empty {
+  display: none;
+}
+.scan-actions .scan-action {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+/* Rarely-touched controls: the reader switch and the autostop setting. */
+.scan-options {
+  margin-top: 10px;
+  font-size: 0.85em;
+}
+.scan-options summary {
+  cursor: pointer;
+  opacity: 0.65;
+}
+.scan-options summary:hover,
+.scan-options[open] summary {
+  opacity: 1;
+}
+
+/* Minimised while sharing: one status line, full width, results below it. */
+.scan-panel.collapsed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.scan-panel.collapsed .scan-panel-head {
+  display: contents;
+}
+/* Out of view, not display:none — the <video> inside is still the frame source. */
+.scan-panel.collapsed .scan-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.scan-panel.collapsed .scan-progress,
+.scan-panel.collapsed .scan-options,
+.scan-panel.collapsed .scan-live-back {
+  display: none;
+}
+.scan-panel.collapsed .scan-status {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scan-panel.collapsed .scan-actions {
+  order: 2;
+  margin: 0;
+}
+.scan-panel.collapsed .scan-panel-min {
+  order: 3;
+  margin-left: 0;
+}
+.scan-panel.collapsed .scan-panel-close {
+  order: 4;
 }
 
 .champion {
@@ -1977,17 +2140,25 @@ body.summoner-search-hidden .wip-notice {
   opacity: 0.5;
 }
 
-/* One-click entry to live reading, above the scan results. */
+/* One-click entry to live reading: a slim row above the champions, shown while
+   the scanner is closed. */
+.scan-launch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 14px;
+}
+.scan-launch[hidden] {
+  display: none;
+}
 .live-launch {
-  display: block;
-  width: 100%;
-  margin: 0 0 16px;
-  padding: 12px 16px;
+  padding: 8px 16px;
   background: var(--accent);
   color: #10131a;
   border: none;
-  border-radius: 8px;
-  font-size: 1em;
+  border-radius: 6px;
+  font-size: 0.95em;
   font-weight: 700;
   letter-spacing: 0.3px;
   cursor: pointer;
@@ -1999,8 +2170,9 @@ body.summoner-search-hidden .wip-notice {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.3);
 }
-.live-launch[hidden] {
-  display: none;
+.scan-launch-hint {
+  font-size: 0.85em;
+  color: var(--muted-fg);
 }
 
 /* Standby (a game is running): a dimmed still with a badge, not a live feed. */
@@ -2025,7 +2197,6 @@ body.summoner-search-hidden .wip-notice {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  font-size: 0.85em;
   opacity: 0.8;
   cursor: pointer;
 }
